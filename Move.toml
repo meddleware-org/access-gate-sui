@@ -1,0 +1,10 @@
+[package]
+edition = "2024"
+name = "access_gate"
+version = "0.0.1"
+license = "CC0-1.0"
+
+[dependencies]
+
+[addresses]
+access_gate = "0x0"

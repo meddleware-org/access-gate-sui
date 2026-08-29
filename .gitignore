@@ -1,0 +1,23 @@
+# Sui build artefacts
+build/
+
+# Sui client keystore and config — never commit private keys
+sui.keystore
+sui.aliases
+client.yaml
+.sui/
+
+# Local deployment output
+.env.localnet
+.env.testnet
+.env.mainnet
+Pub.*.toml
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
