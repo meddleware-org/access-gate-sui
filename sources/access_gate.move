@@ -85,6 +85,8 @@ use sui::sui::SUI;
 
 // ── One-time witness (required for Publisher + Display) ────────────────────────
 
+/// One-time witness for the module. Consumed in `init` to claim the `Publisher`
+/// and set up the NFT `Display`. Name matches the module (uppercased) as the OTW rule requires.
 public struct ACCESS_GATE has drop {}
 
 // ── Error codes ────────────────────────────────────────────────────────────────
@@ -551,31 +553,37 @@ public fun make_gate_immutable(cap: AdminCap, gate: &mut Gate, ctx: &TxContext) 
     id.delete();
 }
 
+/// Update the gate price for future purchases (does not affect in-flight transactions).
 public fun set_price(cap: &AdminCap, gate: &mut Gate, price_mist: u64) {
     assert_admin_mutable(cap, gate);
     gate.price_mist = price_mist;
 }
 
+/// Redirect future purchase payments to a new recipient address.
 public fun set_payment_recipient(cap: &AdminCap, gate: &mut Gate, recipient: address) {
     assert_admin_mutable(cap, gate);
     gate.payment_recipient = recipient;
 }
 
+/// Pause or unpause `purchase`. When paused, `purchase` aborts with `E_PAUSED`.
 public fun set_paused(cap: &AdminCap, gate: &mut Gate, paused: bool) {
     assert_admin_mutable(cap, gate);
     gate.paused = paused;
 }
 
+/// Change the default uses for future mints (does not affect already-minted NFTs).
 public fun set_default_uses(cap: &AdminCap, gate: &mut Gate, default_uses: u64) {
     assert_admin_mutable(cap, gate);
     gate.default_uses = default_uses;
 }
 
+/// Switch the soulbound flag for future mints (does not affect already-minted NFTs).
 public fun set_soulbound(cap: &AdminCap, gate: &mut Gate, soulbound: bool) {
     assert_admin_mutable(cap, gate);
     gate.soulbound = soulbound;
 }
 
+/// Toggle the auto-burn policy for future mints (does not affect already-minted NFTs).
 public fun set_auto_burn_at_zero(cap: &AdminCap, gate: &mut Gate, auto_burn_at_zero: bool) {
     assert_admin_mutable(cap, gate);
     gate.auto_burn_at_zero = auto_burn_at_zero;
@@ -622,20 +630,26 @@ public fun set_commission_bps(
 
 // ── Views ───────────────────────────────────────────────────────────────────────
 
+/// The object ID of the `Gate` from which this NFT was minted.
 public fun gate_id(nft: &AccessNFT): ID { nft.data.gate_id }
 
+/// Soulbound counterpart of `gate_id`.
 public fun gate_id_soulbound(nft: &SoulboundAccessNFT): ID { nft.data.gate_id }
 
+/// Remaining uses for a single-use NFT, or `none` for an unlimited pass.
 public fun uses_remaining(nft: &AccessNFT): Option<u64> { data_uses_remaining(&nft.data) }
 
+/// Soulbound counterpart of `uses_remaining`.
 public fun uses_remaining_soulbound(nft: &SoulboundAccessNFT): Option<u64> {
     data_uses_remaining(&nft.data)
 }
 
+/// True if the NFT was minted from `gate` (i.e. its `gate_id` matches).
 public fun is_valid_for(nft: &AccessNFT, gate: &Gate): bool {
     nft.data.gate_id == object::id(gate)
 }
 
+/// Soulbound counterpart of `is_valid_for`.
 public fun is_valid_for_soulbound(nft: &SoulboundAccessNFT, gate: &Gate): bool {
     nft.data.gate_id == object::id(gate)
 }
@@ -647,32 +661,46 @@ fun data_uses_remaining(data: &AccessData): Option<u64> {
     }
 }
 
+/// Price in MIST charged by `purchase` (0 = free gate).
 public fun gate_price_mist(gate: &Gate): u64 { gate.price_mist }
 
+/// Address that receives the operator share of each paid `purchase`.
 public fun gate_payment_recipient(gate: &Gate): address { gate.payment_recipient }
 
+/// Default uses minted into each NFT (0 = unlimited pass).
 public fun gate_default_uses(gate: &Gate): u64 { gate.default_uses }
 
+/// True if `purchase` is currently disabled.
 public fun gate_is_paused(gate: &Gate): bool { gate.paused }
 
+/// True if the gate has been made immutable via `make_gate_immutable`.
 public fun gate_is_frozen(gate: &Gate): bool { gate.frozen }
 
+/// True if newly-minted NFTs are soulbound.
 public fun gate_is_soulbound(gate: &Gate): bool { gate.soulbound }
 
+/// True if single-use NFTs are auto-deleted when they reach zero uses.
 public fun gate_auto_burn_at_zero(gate: &Gate): bool { gate.auto_burn_at_zero }
 
+/// Object ID of the `AdminCap` authorised over this gate.
 public fun gate_admin_cap_id(gate: &Gate): ID { gate.admin_cap_id }
 
+/// The `Gate` ID this cap is authorised over.
 public fun admin_cap_gate_id(cap: &AdminCap): ID { cap.gate_id }
 
+/// Default NFT display name copied into minted NFTs.
 public fun gate_nft_name(gate: &Gate): String { gate.nft_name }
 
+/// Default NFT image URL copied into minted NFTs.
 public fun gate_nft_image_url(gate: &Gate): String { gate.nft_image_url }
 
+/// Default NFT description copied into minted NFTs.
 public fun gate_nft_description(gate: &Gate): String { gate.nft_description }
 
+/// Address that receives commission payments from every paid `purchase`.
 public fun platform_treasury(config: &PlatformConfig): address { config.treasury }
 
+/// Commission rate in basis points (20 = 0.2%). Hard cap: 1000 bps.
 public fun platform_commission_bps(config: &PlatformConfig): u64 { config.commission_bps }
 
 // ── Test-only helpers ─────────────────────────────────────────────────────────────
