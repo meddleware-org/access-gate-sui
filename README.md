@@ -47,6 +47,29 @@ to `.env.<network>` for the gateway and frontend to consume.
 `AccessBurnedEvent`. Off-chain indexers subscribe to these; the consume event's `nonce` is
 the binding key for single-use verification.
 
+## Consuming this package as a dependency
+
+Other Move packages depend on `access_gate` via a **git dependency pinned to a tag** (Move has no
+crates.io — packages are resolved from git or a local path):
+
+```toml
+[dependencies]
+access_gate = { git = "https://github.com/meddleware-org/access-gate-sui.git", rev = "v0.0.2" }
+```
+
+The package's `Move.toml` carries `published-at` (and an `[addresses]` entry) for its on-chain id, so
+a consumer resolves `access_gate`'s address automatically — no override needed.
+
+**Release = push a tag.** There is no registry publish step and no CI publish job: a version is
+consumable once its `v*` tag exists on GitHub. To cut a release, tag the commit and push it:
+
+```bash
+git tag v0.0.2 && git push origin v0.0.2
+```
+
+(The on-chain deployment is separate — `./scripts/publish.sh testnet` — and only needs redoing when
+the Move source changes.)
+
 ## License
 
 CC0-1.0 (public domain). See the repo root.
