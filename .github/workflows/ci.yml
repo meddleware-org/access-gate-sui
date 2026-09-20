@@ -20,7 +20,9 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Sui CLI (testnet channel)
-        run: suiup install sui@testnet-v1.76.1
+        run: |
+          suiup install sui@testnet-v1.76.1
+          suiup switch sui@testnet-v1.76.1
 
       - name: Verify Sui version
         run: sui --version
