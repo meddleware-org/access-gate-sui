@@ -3,8 +3,8 @@ edition = "2024"
 name = "access_gate"
 version = "0.0.1"
 license = "0BSD"
+published-at = "0x692547ae051c44875d2a08ebdb35a0c234d3492511b5680c7bc5b9c9ba0d68bc"
 
 [dependencies]
 
 [addresses]
-access_gate = "0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d"
