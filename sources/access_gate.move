@@ -105,6 +105,12 @@ const E_WRONG_GATE: u64 = 5;
 const E_GATE_FROZEN: u64 = 6;
 /// `set_commission_bps` was called with a value exceeding the 10% hard cap.
 const E_COMMISSION_TOO_HIGH: u64 = 7;
+/// `consume` was called with a nonce shorter than `MIN_NONCE_LENGTH` bytes.
+const E_INVALID_NONCE: u64 = 8;
+
+/// Minimum nonce length (bytes). Enforced by `consume_data`; ensures the server-issued
+/// challenge carries enough entropy to be meaningful as a replay guard.
+const MIN_NONCE_LENGTH: u64 = 8;
 
 // ── Platform commission config ────────────────────────────────────────────────
 
@@ -230,10 +236,14 @@ public struct AccessMintedEvent has copy, drop {
 
 /// Emitted when a single-use NFT is consumed. The `nonce` binds the consumption to a
 /// server-issued challenge; a verifying gateway indexes this field.
+/// `consumer` is the transaction sender (the NFT owner who called `consume`/`consume_soulbound`);
+/// gateways bind this address to the grant to prevent a valid event from being claimed by a
+/// different sender.
 public struct AccessConsumedEvent has copy, drop {
     nft_id: ID,
     gate_id: ID,
     nonce: vector<u8>,
+    consumer: address,
     uses_after: u64,
     timestamp_ms: u64,
 }
@@ -436,7 +446,7 @@ fun new_variant(default_uses: u64): AccessVariant {
 public fun consume(mut nft: AccessNFT, gate: &Gate, nonce: vector<u8>, ctx: &mut TxContext) {
     let nft_id = object::id(&nft);
     let ts = ctx.epoch_timestamp_ms();
-    let burn = consume_data(&mut nft.data, gate, nonce, nft_id, ts);
+    let burn = consume_data(&mut nft.data, gate, nonce, nft_id, ts, ctx.sender());
     if (burn) {
         let AccessNFT { id, data, name: _, image_url: _, description: _ } = nft;
         destroy_data(data);
@@ -457,7 +467,7 @@ public fun consume_soulbound(
 ) {
     let nft_id = object::id(&nft);
     let ts = ctx.epoch_timestamp_ms();
-    let burn = consume_data(&mut nft.data, gate, nonce, nft_id, ts);
+    let burn = consume_data(&mut nft.data, gate, nonce, nft_id, ts, ctx.sender());
     if (burn) {
         let SoulboundAccessNFT { id, data, name: _, image_url: _, description: _ } = nft;
         destroy_data(data);
@@ -476,7 +486,9 @@ fun consume_data(
     nonce: vector<u8>,
     nft_id: ID,
     ts: u64,
+    consumer: address,
 ): bool {
+    assert!(vector::length(&nonce) >= MIN_NONCE_LENGTH, E_INVALID_NONCE);
     assert!(data.gate_id == object::id(gate), E_WRONG_GATE);
     let gate_id = data.gate_id;
     let auto_burn = gate.auto_burn_at_zero;
@@ -489,6 +501,7 @@ fun consume_data(
                 nft_id,
                 gate_id,
                 nonce,
+                consumer,
                 uses_after: after,
                 timestamp_ms: ts,
             });
@@ -727,4 +740,28 @@ public fun share_platform_config_zero_commission_for_testing(ctx: &mut TxContext
         treasury: ctx.sender(),
         commission_bps: 0,
     });
+}
+
+#[test_only]
+/// Create and share a `PlatformConfig` with an explicit `treasury` + `commission_bps` for tests
+/// that exercise the commission split. (Bypasses the `set_commission_bps` cap by construction —
+/// use `set_commission_bps` itself to test the `E_COMMISSION_TOO_HIGH` boundary.)
+public fun share_platform_config_for_testing(treasury: address, commission_bps: u64, ctx: &mut TxContext) {
+    transfer::share_object(PlatformConfig {
+        id: object::new(ctx),
+        treasury,
+        commission_bps,
+    });
+}
+
+#[test_only]
+/// Mint a `PlatformAdminCap` for tests exercising the platform setters.
+public fun new_platform_admin_cap_for_testing(ctx: &mut TxContext): PlatformAdminCap {
+    PlatformAdminCap { id: object::new(ctx) }
+}
+
+#[test_only]
+public fun burn_platform_admin_cap_for_testing(cap: PlatformAdminCap) {
+    let PlatformAdminCap { id } = cap;
+    id.delete();
 }

@@ -7,9 +7,16 @@
 # (gateway config, frontend config).
 #
 # Usage:
-#   ./scripts/publish.sh localnet [--create-gate]
-#   ./scripts/publish.sh testnet [--create-gate]
-#   ./scripts/publish.sh mainnet [--create-gate]
+#   ./scripts/publish.sh localnet [--create-gate] [--make-immutable]
+#   ./scripts/publish.sh testnet  [--create-gate] [--make-immutable]
+#   ./scripts/publish.sh mainnet  [--create-gate] [--make-immutable]
+#
+# Flags (order-independent after the network argument):
+#   --create-gate      After publishing, call access_gate::create_gate with the defaults below.
+#   --make-immutable   After publishing (and gate creation, if requested), burn the UpgradeCap
+#                      permanently via 0x2::package::make_immutable. IRREVERSIBLE. Prompts for
+#                      explicit "YES" confirmation. Not meaningful on localnet (test-publish
+#                      already creates an ephemeral immutable package).
 #
 # Env for --create-gate (all optional; sensible defaults shown):
 #   GATE_PRICE_MIST        default 0        (free)
@@ -34,7 +41,15 @@ if [ -z "${1:-}" ]; then
     exit 1
 fi
 NETWORK="$1"
-CREATE_GATE="${2:-}"
+CREATE_GATE=""
+MAKE_IMMUTABLE=""
+for _arg in "${@:2}"; do
+    case "$_arg" in
+        --create-gate)    CREATE_GATE="--create-gate" ;;
+        --make-immutable) MAKE_IMMUTABLE="--make-immutable" ;;
+    esac
+done
+unset _arg
 GAS_BUDGET="${GAS_BUDGET:-200000000}"
 ENV_FILE="$PKG_DIR/.env.${NETWORK}"
 
@@ -128,6 +143,22 @@ if [ "$CREATE_GATE" == "--create-gate" ]; then
     echo "ACCESS_GATE_ADMIN_CAP_ID=$ADMIN_CAP_ID"
   } >> "$ENV_FILE"
   log "Gate created. gateId=$GATE_ID adminCapId=$ADMIN_CAP_ID"
+fi
+
+if [ "$MAKE_IMMUTABLE" = "--make-immutable" ]; then
+    if [ "$NETWORK" = "localnet" ]; then
+        log "NOTE: --make-immutable has no effect on localnet (test-publish already creates an ephemeral package). Skipping."
+    else
+        log "WARNING: About to burn UpgradeCap $UPGRADE_CAP_ID for package $PACKAGE_ID."
+        log "         This is PERMANENTLY IRREVERSIBLE. The package can never be upgraded."
+        read -r -p "         Type YES to confirm: " CONFIRM
+        [ "$CONFIRM" = "YES" ] || { log "Aborted."; exit 1; }
+        sui client call --json --gas-budget "$GAS_BUDGET" \
+            --package 0x2 --module package --function make_immutable \
+            --args "$UPGRADE_CAP_ID"
+        sed -i '/^ACCESS_GATE_UPGRADE_CAP_ID=/d' "$ENV_FILE"
+        log "Package $PACKAGE_ID is now permanently immutable. UpgradeCap removed from $ENV_FILE."
+    fi
 fi
 
 log "Done. Configure the gateway/frontend with:"

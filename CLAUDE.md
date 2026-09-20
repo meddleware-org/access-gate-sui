@@ -41,9 +41,10 @@ Consumers (a gateway, a frontend, a contract) compose on top.
 ## Error codes
 
 `E_PAUSED=1`, `E_INSUFFICIENT_PAYMENT=2`, `E_NOT_SINGLE_USE=3`, `E_NO_USES_REMAINING=4`,
-`E_WRONG_GATE=5`. Tests reference these by literal in `#[expected_failure(abort_code = …)]`
-because module-private constants are not cross-module referenceable in that attribute — keep
-the literal and the constant in sync if you renumber.
+`E_WRONG_GATE=5`, `E_GATE_FROZEN=6`, `E_COMMISSION_TOO_HIGH=7`, `E_INVALID_NONCE=8`.
+Tests reference these by literal in `#[expected_failure(abort_code = …)]` because
+module-private constants are not cross-module referenceable in that attribute — keep the
+literal and the constant in sync if you renumber.
 
 ## Testing
 
@@ -59,3 +60,26 @@ airdrop, admin setters, voluntary burn. Add a test for every new entry/branch.
   field + a view + tests.
 - If you touch the ABI (entry signatures, event fields), update the TS client
   (`packages/nft-gate-client`) and the Rust gateway (`gateway/`) — they mirror this.
+
+---
+
+## Deferred documentation — NOT for the `docs.` website (planned here per Part 0.4)
+
+> Captured for the future **`dev.meddleware.co.uk`** subdomain and white-label offering; excluded
+> from the user-facing `docs.` site (which explains gates for operators and buyers in plain terms).
+
+### `dev.` — developer/integrator reference (to write later)
+
+- **Curated contract reference** (Move has no clean autodoc — author from source): entry-function
+  signatures (`create_gate`, `purchase`, `consume`, `airdrop`, `burn`, admin setters), object shapes
+  (`Gate`, `AccessNFT`/`SoulboundAccessNFT`, `AdminCap`, `AccessData`/`AccessVariant`), event schemas
+  (`GateCreated`/`AccessMinted`/`AccessConsumed`{`nonce`}/`AccessBurned`), and the error-code table.
+  These same tables feed the docs-site Access Gate *reference* page and the `dev.` deep-dive.
+- **Composition guide:** how a gateway/frontend/contract composes on the consumer-agnostic primitive;
+  the `consume`→`nonce` binding that verifiers must use (never trust a bare address).
+
+### White-label (to write later)
+
+- Operators deploying their **own gate set** under the shared platform (commission enforced by
+  `PlatformConfig`); which knobs are gate-owner-controlled (`price_mist`, `default_uses`, `soulbound`,
+  `auto_burn_at_zero`, `paused`) vs platform-only (`set_platform_treasury`, `set_commission_bps`).

@@ -12,6 +12,7 @@ use sui::test_scenario as ts;
 const CREATOR: address = @0xA1;
 const BUYER: address = @0xB0B;
 const PAYEE: address = @0xFEE;
+const TREASURY: address = @0x7EA;
 
 // Helper: create a gate in the current tx with empty display metadata.
 fun new_gate(
@@ -181,7 +182,7 @@ fun test_single_use_consume_decrements_and_returns_receipt() {
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
     assert!(nft.uses_remaining() == option::some(3), 0);
-    access_gate::consume(nft, &gate, b"nonce-1", s.ctx());
+    access_gate::consume(nft, &gate, b"nonce-01", s.ctx());
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -208,7 +209,7 @@ fun test_single_use_auto_burn_at_zero_deletes() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"nonce-1", s.ctx());
+    access_gate::consume(nft, &gate, b"nonce-01", s.ctx());
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -233,13 +234,35 @@ fun test_single_use_no_auto_burn_keeps_zero_receipt() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"nonce-1", s.ctx());
+    access_gate::consume(nft, &gate, b"nonce-01", s.ctx());
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
     let nft = s.take_from_sender<AccessNFT>();
     assert!(nft.uses_remaining() == option::some(0), 0); // spent receipt
     s.return_to_sender(nft);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 8)]
+fun test_consume_short_nonce_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    new_gate(&mut s, 0, 2, false, false);
+    s.next_tx(BUYER);
+
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(0, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let nft = s.take_from_sender<AccessNFT>();
+    access_gate::consume(nft, &gate, b"short", s.ctx()); // 5 bytes < MIN_NONCE_LENGTH -> abort E_INVALID_NONCE
+    ts::return_shared(gate);
     s.end();
 }
 
@@ -260,7 +283,7 @@ fun test_consume_unlimited_pass_aborts() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"n", s.ctx()); // aborts E_NOT_SINGLE_USE
+    access_gate::consume(nft, &gate, b"00000001", s.ctx()); // aborts E_NOT_SINGLE_USE
     ts::return_shared(gate);
     s.end();
 }
@@ -282,13 +305,13 @@ fun test_consume_exhausted_aborts() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"n1", s.ctx());
+    access_gate::consume(nft, &gate, b"00000001", s.ctx());
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"n2", s.ctx()); // zero uses -> abort E_NO_USES_REMAINING
+    access_gate::consume(nft, &gate, b"00000002", s.ctx()); // zero uses -> abort E_NO_USES_REMAINING
     ts::return_shared(gate);
     s.end();
 }
@@ -314,7 +337,7 @@ fun test_soulbound_mint_and_consume() {
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<SoulboundAccessNFT>();
     assert!(nft.uses_remaining_soulbound() == option::some(2), 2);
-    access_gate::consume_soulbound(nft, &gate, b"nonce-s", s.ctx());
+    access_gate::consume_soulbound(nft, &gate, b"nonce-sb", s.ctx());
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -345,7 +368,7 @@ fun test_consume_wrong_gate_aborts() {
     let nft = s.take_from_sender<AccessNFT>();
     // Take the OTHER gate (the newest shared one is gate B).
     let gate_b = s.take_shared<Gate>();
-    access_gate::consume(nft, &gate_b, b"n", s.ctx()); // NFT belongs to gate A -> abort E_WRONG_GATE
+    access_gate::consume(nft, &gate_b, b"00000001", s.ctx()); // NFT belongs to gate A -> abort E_WRONG_GATE
     ts::return_shared(gate_b);
     s.end();
 }
@@ -459,5 +482,68 @@ fun test_setter_on_frozen_gate_aborts() {
     access_gate::set_price(&cap2, &mut gate, 1); // gate frozen -> abort E_GATE_FROZEN
     access_gate::burn_admin_cap_for_testing(cap2);
     ts::return_shared(gate);
+    s.end();
+}
+
+// ── Commission split (C.1) ─────────────────────────────────────────────────────
+
+#[test]
+fun test_purchase_nonzero_commission_splits_payment() {
+    let mut s = ts::begin(CREATOR);
+    // 2.5% commission to TREASURY; gate price 1000 → commission 25, operator share 975.
+    access_gate::share_platform_config_for_testing(TREASURY, 250, s.ctx());
+    new_gate(&mut s, 1_000, 0, false, false);
+    s.next_tx(BUYER);
+
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    let payment = coin::mint_for_testing<SUI>(1_000, s.ctx());
+    access_gate::purchase(&gate, &platform, payment, s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+
+    // Treasury receives exactly the 2.5% commission.
+    s.next_tx(TREASURY);
+    let commission = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(commission.value() == 25, 0);
+    s.return_to_sender(commission);
+
+    // Payee receives exactly the operator share (price − commission).
+    s.next_tx(PAYEE);
+    let paid = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(paid.value() == 975, 1);
+    s.return_to_sender(paid);
+    s.end();
+}
+
+// ── Commission cap boundary (E_COMMISSION_TOO_HIGH = 7) ─────────────────────────
+
+#[test]
+fun test_set_commission_at_cap_succeeds() {
+    let mut s = ts::begin(CREATOR);
+    access_gate::share_platform_config_for_testing(TREASURY, 0, s.ctx());
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    s.next_tx(CREATOR);
+
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_commission_bps(&cap, &mut platform, 1000); // exactly 10% — inclusive cap
+    assert!(platform.platform_commission_bps() == 1000, 0);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 7)] // E_COMMISSION_TOO_HIGH
+fun test_set_commission_above_cap_aborts() {
+    let mut s = ts::begin(CREATOR);
+    access_gate::share_platform_config_for_testing(TREASURY, 0, s.ctx());
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    s.next_tx(CREATOR);
+
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_commission_bps(&cap, &mut platform, 1001); // > cap → abort
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
     s.end();
 }
