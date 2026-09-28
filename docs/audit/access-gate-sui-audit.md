@@ -5,11 +5,11 @@
 **Project type:** Move package
 **Template:** AUDIT_TEMPLATE.md (2026-09-28) + AUDIT_TEMPLATE_SUI.md (2026-09-28)
 **Package:** `access_gate` v0.0.2; edition 2024; framework rev `b0535f1f3a33` (Move.lock, testnet)
-**Deployment status:** testnet — canonical package `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d` (UpgradeCap `0x1ab9a455…4e89` **live**, compatible policy, publisher EOA; predates F10/F11/F24); a stray duplicate `0x692547ae…68bc` (UpgradeCap `0x6b6cd7d4…a9a2`, live) holds only its `init` objects and is used by no consumer (F14); mainnet: unpublished. The source is ahead of every deployment and ships as a **new package** (F24).
+**Deployment status:** testnet — package `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4` (published 2026-09-28 from `dcd2d3c`; `PlatformConfig` `0xe3b949ca…23f7`; UpgradeCap `0xf04a1d87…32bc` **live**, compatible policy, publisher EOA). Superseded: `0x0bedd0…d20d` (pre-policy source; still holds the live Walrus relay gate `0x0485…` until it migrates; UpgradeCap burned). Strays `0x692547…68bc`, `0x891cc2…985c`, `0xbd2b4f…7f79` (unused publishes; UpgradeCaps burned). Mainnet: unpublished.
 **Review date:** 2026-09-18 (first pass) · re-verified and relocated 2026-09-28
 **Reviewer:** Internal review (Move contract reviewer)
 **Severity ceiling:** High — the package handles on-chain SUI payments and a platform commission split; a capability or accounting flaw could misroute funds. Realized ceiling: **Medium** (F1, F10, F12 — all RESOLVED in source/tooling).
-**Status:** re-verified 2026-09-28 (second pass same day: gate policies, owner answers)
+**Status:** re-verified 2026-09-28 (third pass same day: platform fees, pause-blocks-access, republished)
 
 Relocated from the workspace corpus (`docs/audit/access-gate-sui-audit.md`, now a pointer stub). All
 `F#` / `OQ#` identifiers from the first pass are preserved.
@@ -21,7 +21,7 @@ Relocated from the workspace corpus (`docs/audit/access-gate-sui-audit.md`, now 
 `access-gate-sui` is a small, dependency-free primitive (Sui framework only). Capability↔gate binding
 is asserted on every privileged path; single-use spend takes the NFT by value (owner-only);
 soulbound non-transferability is structural (`key` without `store`); abort codes are unique within
-the module; emit-before-delete holds everywhere. **42/42** tests pass (sui 1.80.0), and every abort
+the module; emit-before-delete holds everywhere. **60/60** tests pass (sui 1.80.0), and every abort
 code has an `expected_failure` test on both the transferable and soulbound paths.
 
 This pass fixed, inline:
@@ -43,11 +43,16 @@ This pass fixed, inline:
 - **F14, F21** — canonical address verified on-chain (`0x0bedd0…`; `Move.toml` no longer names the
   stray package); licence aligned to 0BSD everywhere.
 
-What remains is operational: the live testnet `UpgradeCap` and single-EOA custody of platform
-authority (F2/F3 — recorded by the owner as an **operator requirement before launch**; burn vs
-multisig still to be chosen), and a **fresh publish** of this source (F24 changes the `Gate` layout
-and a public signature, so it cannot be an upgrade), followed by the seal-policies rebuild and
-consumer migration. **The deployed testnet package predates F10/F11/F24.**
+A third pass the same day made the platform's revenue an on-chain guarantee (owner decision):
+**F26** commission floor and minimum paid price, **F27** a one-off free-gate fee that no price
+change can dodge, **F28** commission on airdrops; added **F29** `pause_blocks_access`; and the
+companion gateway change **F30** (only access_gate passes of a required `GATE_ID` are accepted, so a
+fungible token or foreign NFT can never stand in for a pass). The source was then published fresh as
+`0x1a81ca…`, and every stray and superseded `UpgradeCap` burned (**F31**).
+
+What remains is operational: custody of the new `UpgradeCap` and of platform authority (F2/F3 —
+an **operator requirement before launch**; burn vs multisig still to be chosen), and migrating the
+live Walrus relay gate and the apps to `0x1a81ca…` (they ship with the unpublished npm releases).
 
 ---
 
@@ -139,7 +144,7 @@ By default the live platform rate (≤ 10%) still applies to frozen gates. A gat
 **Severity:** Info   **Disposition:** ADJUDICATED — intentional; `test_airdrop_on_frozen_gate_aborts` added.
 
 ### F6 — Abort-code uniqueness (module) and arithmetic
-**Severity:** Positive — codes 1–10 distinct within `access_gate`; after F10 no reachable arithmetic
+**Severity:** Positive — codes 1–12 distinct within `access_gate`; after F10 no reachable arithmetic
 can overflow; `operator_share` cannot underflow. Codes repeat across packages (`seal_policies`
 uses 1–3) — clients key on `(module, code)`.
 
@@ -300,12 +305,87 @@ changed, which a compatible upgrade forbids — the release is a **new package**
 (500 MIST at 20 bps) pays the platform nothing.
 **Decision (owner):** the minimum is operator-configurable; Meddleware's deployment uses the minimum
 profitable amount.
-**Remediation / evidence:** `nft-gate-client` `minimumProfitablePriceMist` / `fetchPlatformCommission`
-(`80f652e`, `4f60283`); `access-gate-ui` `VITE_GATE_MIN_PRICE_MIST` (`auto` = the live-commission
-floor, default; an integer = fixed floor; `0` = none) and `VITE_GATE_ALLOW_FREE` (`e91781a`). The
-contract does not enforce a floor: direct callers can still create dust-priced gates (Risks). Any
-commission of ≥ 1 MIST is net-positive for the treasury (receiving a coin costs the recipient nothing,
-and its storage deposit is paid by the buyer), so ≥ 1 MIST is the profitability threshold.
+**Remediation / evidence:** first at the tool layer (`nft-gate-client` `80f652e`/`4f60283`,
+`access-gate-ui` `e91781a`); **superseded by F26**, which enforces the floor on-chain for every
+caller and makes it worthwhile rather than merely non-zero.
+
+### F26 — Commission floor and minimum paid price (on-chain)
+**Severity:** Medium (revenue integrity)   **Disposition:** RESOLVED (`6bdf8a6`; live in `0x1a81ca…`)
+**Issue:** with a pure 0.2% commission, cheap passes paid the platform almost nothing (1 MIST at
+the old 500 MIST floor), and any floor lived only in Meddleware's own tool, so a direct contract call
+could create a dust-priced gate on Meddleware's package.
+**Decision (owner):** the amount received should cover the service and leave a small profit that is
+trivial per user but measurable across a small-to-medium user base, assuming every sale is at the
+minimum price.
+**Design:** `PlatformConfig.min_commission_mist`: commission = `max(⌊price × bps / 10000⌋,
+min_commission)`, capped at 10% of the price (the existing promise to creators). A paid price must be
+≥ `min_paid_price_mist` = 10 × the floor (`E_PRICE_TOO_LOW = 11` in `create_gate`/`set_price`), so
+the floor always fits under the cap. Defaults: 20 bps, floor 1,000,000 MIST (0.001 SUI) ⇒ minimum
+paid price 0.01 SUI. Raising the floor later never breaks existing gates: their commission stays
+capped at 10%. Governed by `PlatformAdminCap` (`set_min_commission_mist`, event
+`PlatformConfigUpdatedEvent`), so it can be tuned without a republish.
+**Sizing:** at the minimum price each sale yields 0.001 SUI of commission, plus ~0.00098 SUI of
+storage deposit in the commission coin that the treasury recovers when it merges coins — about
+0.002 SUI per sale: ~2 SUI/month at 1,000 minimum-price sales, ~20 SUI at 10,000. The buyer pays
+0.01 SUI (a few cents), comparable to a couple of transactions' gas. A higher floor was not needed for
+spam deterrence: every sale already costs the buyer the price plus gas, and gate creation is
+covered by F27.
+**Evidence:** `test_min_commission_applies_to_cheap_purchases`, `test_percentage_applies_above_the_floor`,
+`test_commission_capped_at_ten_percent_after_floor_raise`, `test_min_paid_price_is_ten_times_the_floor`,
+`test_commission_for_price_formula`, `test_create_gate_below_min_price_aborts`,
+`test_set_price_below_min_aborts`, `test_locked_terms_keep_the_floor`, `test_platform_fee_setters_update`.
+
+### F27 — Free gates pay a one-off fee that no price change avoids
+**Severity:** Medium (revenue integrity)   **Disposition:** RESOLVED (`6bdf8a6`)
+**Decision (owner):** free gates are allowed if their creator pays an initial amount and the gate
+cannot later be re-configured to escape it.
+**Design:** `create_free_gate` pays `PlatformConfig.free_gate_fee_mist` (default 0.1 SUI — the
+commission of 100 minimum-price sales) to the treasury; `create_gate` rejects price 0; a paid gate
+becomes free only through `make_gate_free`, which charges the fee once (`free_fee_paid`); `set_price(0)`
+aborts `E_FREE_FEE_UNPAID = 12` until then. Once paid, the gate may move freely between free and paid —
+every paid sale carries the commission, so no transition loses revenue.
+**Evidence:** `test_create_free_gate_pays_fee_and_refunds_excess`, `test_create_free_gate_underpaid_fee_aborts`,
+`test_create_gate_zero_price_aborts`, `test_set_price_zero_without_fee_aborts`,
+`test_make_gate_free_charges_once_then_price_can_toggle`.
+
+### F28 — Airdrops could replace sales and bypass the commission
+**Severity:** Medium (revenue integrity)   **Disposition:** RESOLVED (`6bdf8a6`)
+**Issue:** a creator could sell passes off-chain and `airdrop` them, paying the platform nothing.
+**Remediation / evidence:** `airdrop(cap, gate, platform, payment, recipient)` charges the commission
+a purchase at the current price would carry (`gate_commission_mist`; 0 for a free gate, whose fee is
+already paid); `AccessMintedEvent.commission_mist` records it. `test_airdrop_pays_commission_on_paid_gate`,
+`test_airdrop_underpaid_commission_aborts`.
+
+### F29 — `pause_blocks_access`: pausing can stop pass use, independently of decryption
+**Severity:** Info (design)   **Disposition:** RESOLVED (`6bdf8a6`; gateways F30)
+**Decision (owner):** relay uploads should be blockable as part of pausing, optionally and
+independently of decryption, with the single best-practice mechanism.
+**Design:** a fourth immutable `GatePolicy` flag. While paused, `consume*` aborts `E_PAUSED` (so a
+single-use holder never spends a use that a gateway would then refuse), and the nft-gate gateways
+read the gate live and deny holders (`403 the gate is paused`), checked before a single-use
+redemption is leased so an earlier consume stays redeemable after unpausing.
+**Evidence:** `test_pause_blocks_access_stops_consume`, `test_pause_without_access_policy_allows_consume`;
+gateway tests in `nft-gate` `bbf8665`.
+
+### F30 — A gateway could gate on a fungible token or foreign NFT (cross-project)
+**Severity:** Low (revenue/scope)   **Disposition:** RESOLVED in `nft-gate` (`bbf8665`)
+**Issue:** the gateways accepted any `NFT_TYPE` and treated `GATE_ID` as optional: a `Coin<T>` type
+would admit holders of a fungible token (never sold through access_gate, so no commission), and
+without `GATE_ID` any pass of the package — including passes of someone else's free gate — admitted.
+access_gate itself only takes SUI and mints non-fungible passes, so there is no fungible-token path in
+the contract.
+**Remediation:** both gateways reject at startup an `NFT_TYPE` other than
+`<pkg>::access_gate::(Soulbound)AccessNFT` and require `GATE_ID`. The 0BSD gateway code can of course
+be modified by others; this keeps Meddleware's deployments and faithful re-users on the paid path.
+
+### F31 — Republish and UpgradeCap burns
+**Severity:** Info   **Disposition:** RESOLVED (owner-authorised, 2026-09-28)
+Published `0x1a81ca…` from `dcd2d3c` (fresh package: the `Gate` layout and public signatures changed).
+Burned (`0x2::package::make_immutable`): stray `0x692547…` cap `0x6b6cd7…` (`FXF4nU6K…`), stray
+`0x891cc2…` cap `0xb0c90e…` (`4RRvo6Qr…`), stray `0xbd2b4f…` cap `0xe81b451c…` (`Fi65BSZA…`), and the
+superseded `0x0bedd0…` cap `0x1ab9a455…` (`HB7XxxQz…`); packages keep working, only upgrades are
+gone. The new relay gate `0xcb8206…5f50` (soulbound, 10 uses, 0.01 SUI) was created with
+`publish.sh --create-gate`, whose PTB path was rewritten for the new ABI.
 
 ---
 
@@ -321,12 +401,13 @@ and its storage deposit is paid by the buyer), so ≥ 1 MIST is the profitabilit
 | I6 | **Event ordering:** emit before delete | `::consume*`, `::burn*`, `::make_gate_immutable` | `test_burn_voluntary`, `test_burn_soulbound`, auto-burn tests | HOLDS |
 | I7 | **Capability binding:** `AdminCap` non-forgeable, per-gate | `::create_gate`, `::assert_admin` | `test_setter_with_foreign_admin_cap_aborts`, `test_admin_setters` | HOLDS |
 | I8 | Frozen gate: no setter/airdrop; purchase/consume continue | `::assert_admin_mutable`, `::make_gate_immutable` | `test_make_gate_immutable_*`, `test_setter_on_frozen_gate_aborts`, `test_airdrop_on_frozen_gate_aborts` | HOLDS |
-| I8b | **Policy:** `GatePolicy` immutable; `freeze_requires_unpaused` ⇒ no paused freeze; a locked commission is the only rate applied afterwards | `::create_gate_with_policy`, `::make_gate_immutable`, `::effective_commission_bps` | F24 tests | HOLDS (source) |
+| I8b | **Policy:** `GatePolicy` immutable; `freeze_requires_unpaused` ⇒ no paused freeze; `pause_blocks_access` ⇒ no paused consume; locked terms are the only terms applied afterwards | `::create_gate`, `::create_free_gate`, `::make_gate_immutable`, `::consume_data`, `::effective_commission_terms` | F24, F29 tests | HOLDS |
+| I16 | **Platform always paid:** paid price ≥ `min_paid_price_mist`; price 0 only after the free-gate fee; every paid mint (purchase or airdrop) pays `max(bps share, floor)` ≤ 10% of the price | `::create_gate`, `::create_free_gate`, `::set_price`, `::make_gate_free`, `::airdrop`, `::commission_for_price` | F26–F28 tests | HOLDS |
 | I9 | **Arithmetic:** commission ≤ 10%, no overflow/underflow, floor rounding, dust = 0 | `::commission_for`, `::purchase`, `::set_commission_bps` | `test_purchase_nonzero_commission_splits_payment`, `test_purchase_max_price_max_commission_does_not_overflow`, `test_commission_dust_rounds_to_zero`, `test_set_commission_*` | HOLDS (source; deployed `0x0bedd0…` predates F10) |
 | I10 | **Abilities:** soulbound cannot be `public_transfer`'d | `SoulboundAccessNFT has key` | type system; `test_soulbound_mint_and_consume` | HOLDS |
 | I11 | Package immutable ⇒ semantics fixed for existing gates | `UpgradeCap` burned | on-chain read: testnet cap live | GAP (F3) |
 | I12 | **Funds routing:** payment = commission + operator share + refund; treasury ≠ `@0x0` | `::purchase`, `::set_platform_treasury` | `test_purchase_overpay_refunds_remainder`, split tests, `test_set_platform_treasury_zero_address_aborts` | HOLDS |
-| I13 | **Abort codes:** unique within module; map published | constants `E_*` 1–10 | every code has an `expected_failure` test; map in `docs/onchain/api-reference.md` | HOLDS |
+| I13 | **Abort codes:** unique within module; map published | constants `E_*` 1–12 | every code has an `expected_failure` test; map in `docs/onchain/api-reference.md` | HOLDS |
 | I14 | Side-effect-freedom | — | no dry-run policy functions in this package | N/A |
 | I15 | Identity / byte layout | — | no client-built bytes decoded (nonce is opaque) | N/A |
 
@@ -362,8 +443,9 @@ and its storage deposit is paid by the buyer), so ≥ 1 MIST is the profitabilit
 
 | Network | Package ID | `UpgradeCap` ID | Status | Intended policy | Tooling |
 | --- | --- | --- | --- | --- | --- |
-| testnet | `0x0bedd0…d20d` (canonical) | `0x1ab9…4e89` | **held** by publisher EOA (policy 0) | immutable (burn) | `make_immutable` call or `transfer-platform-authority.sh --include-upgrade-cap` (dry-run default, `YES` confirm) |
-| testnet | `0x692547…68bc` (stray, unused) | `0x6b6cd7…a9a2` | **held** by publisher EOA | burn (OQ13) | `make_immutable` call |
+| testnet | `0x1a81ca…eea4` (current) | `0xf04a1d87…32bc` | **held** by publisher EOA (policy 0) | burn or multisig — operator requirement before launch | `make_immutable` call or `transfer-platform-authority.sh --include-upgrade-cap` (dry-run default, `YES` confirm) |
+| testnet | `0x0bedd0…d20d` (superseded) | `0x1ab9…4e89` | **burned** 2026-09-28 | — | — |
+| testnet | `0x692547…`, `0x891cc2…`, `0xbd2b4f…` (strays) | `0x6b6cd7…`, `0xb0c90e…`, `0xe81b451c…` | **burned** 2026-09-28 | — | — |
 | mainnet | — | — | unpublished | immutable (burn at publish: `publish.sh --make-immutable`) | `publish.sh` (typed `YES` confirm) |
 
 **Versioning to integrators:** each release is a new package ID; old gates and passes stay valid under
@@ -397,12 +479,12 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
 
 ## Section C — Test-coverage & hermetic/live split
 
-### C.1 Coverage grade — A (42/42, sui 1.80.0)
+### C.1 Coverage grade — A (60/60, sui 1.80.0)
 
 | Dimension | Assessment |
 | --- | --- |
 | Happy-path | A — init defaults, create, purchase (exact/overpay/free), commission split, single-use decrement + receipt, auto-burn, soulbound mint+consume, airdrop, burns, setters, freeze, platform setters |
-| Error-path / abort codes | A — codes 1–10 each have `expected_failure` tests; 3/4/5/8 also on the soulbound path |
+| Error-path / abort codes | A — codes 1–12 each have `expected_failure` tests; 3/4/5/8 also on the soulbound path |
 | Boundary / edge | A — `u64::MAX` price at 10%, dust rounding, 7-byte nonce, zero uses, exhausted vs unlimited, foreign cap, frozen-while-paused, auto-burn changed after mint |
 | Security-relevant | A — cross-gate consume/approve (both variants), frozen guards, cap binding, short nonce, consumer field, zero treasury |
 
@@ -421,22 +503,22 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
 
 ### pre-localnet
 
-- [x] compiles; 42/42 hermetic tests green (sui 1.80.0) — CI `move-ci.yml`
+- [x] compiles; 60/60 hermetic tests green (sui 1.80.0) — CI `move-ci.yml`
 - [x] every abort code tested; no unchecked u64 products; all caps bound (F6, F9, F10)
 - [x] `SECURITY.md` present and consistent with this audit (F16)
 
 ### pre-testnet
 
 - [ ] docs./dev. sites install the published `@meddleware/access-gate-sui` and import its on-chain docs — F23
-- [x] published — canonical `0x0bedd0…` (predates F10/F11)
+- [x] published — `0x1a81ca…` (all fixes through F31; `Published.toml`)
 - [x] package ID recorded consistently across `Move.toml` / `SECURITY.md` / consumers — F14
 - [x] dependants pin commit SHAs (seal-policies `f191c2d`) — F15
 - [x] custody/immutability tooling with dry-run default + explicit confirmation — F12/F13
-- [ ] fresh publish of the F10/F11/F24 source (new package, `Published.toml` recorded), then: bump
-  seal-policies' `access_gate` rev and rebuild/publish it; update `ACCESS_GATE_PACKAGE_ID` /
-  `ACCESS_GATE_PLATFORM_CONFIG_ID` in access-gate-ui and walrus-relay, seal-ui/seal-client package IDs,
-  and the docs; publish `@meddleware/nft-gate-client` (freeze builder targets the new ABI) — owner
-  will do this after the off-chain changes land
+- [x] fresh publish; seal-policies republished against it (`0x42cc18…`); consumer defaults and docs
+  point at the new IDs (in each repo, unreleased)
+- [ ] push access-gate-sui, then regenerate seal-policies' `Move.lock` (CI red until then)
+- [ ] release the npm packages and apps that target the new ABI, and migrate the live Walrus relay
+  gate (walrus-ui `VITE_ACCESS_GATE_ID_TESTNET` + Worker `GATE_ID`/`NFT_TYPE`) in one step
 
 ### pre-mainnet
 
@@ -444,7 +526,7 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
   execute it at publish — **blocking** (F3, OQ1)
 - [ ] **Operator requirement before launch:** `PlatformAdminCap` / `Publisher` / `Display` moved to
   a multisig — **blocking** (F2, OQ2)
-- [ ] testnet `UpgradeCap` burned or moved — non-blocking (F3, OQ1)
+- [ ] current testnet `UpgradeCap` (`0xf04a…`) burned or moved — non-blocking (F3, OQ1); strays and superseded caps burned (F31)
 - [x] full Section A coverage except I11 (custody); abort-code map published (`docs/onchain/api-reference.md`)
 - [ ] live-only paths (C.2) exercised on testnet
 - [ ] external audit
@@ -477,8 +559,10 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
    `Publisher` / `Display` MUST be held by a multisig — **not yet** (F2, F3).
 7. The canonical package address MUST be the one recorded in `Published.toml`, `SECURITY.md` and
    every consumer — holds (`0x0bedd0…`; `Move.toml` carries no `published-at`) (F14).
-9. A gate's `GatePolicy` MUST be immutable after creation, and a locked commission MUST be the only
-   rate applied to that gate's purchases — holds in source (I8b).
+9. A gate's `GatePolicy` MUST be immutable after creation, and locked commission terms MUST be the
+   only terms applied to that gate — holds (I8b).
+10. Every gate of the package MUST yield platform revenue: paid mints (purchases and airdrops) pay
+    the commission floor or more, and a free gate pays the free-gate fee once — holds (I16).
 8. Downstream Move packages MUST pin this dependency to a commit SHA — holds for seal-policies.
 
 ## Implementation suggestions (SHOULD / MAY)
@@ -526,11 +610,17 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
     free-gate creators who pass the zero address today)?
 13. **OQ13** Burn the stray package's `UpgradeCap` (`0x6b6cd7…a9a2`, for `0x692547…`) — and the
     `seal_policies` stray `0x67520f…`'s cap — so no one can ever upgrade them into something
-    consumers might mistake for the real package?
+    consumers might mistake for the real package? *(2026-09-28, owner: yes — done, with every other
+    stray and superseded cap (F31).)*
 14. **OQ14** Free (price 0) gates earn no commission. Should Meddleware's deployment allow them
-    (`VITE_GATE_ALLOW_FREE`, currently `true`)?
+    (`VITE_GATE_ALLOW_FREE`, currently `true`)? *(2026-09-28, owner: yes, if creation is charged and
+    cannot be dodged by re-configuration — F27; the tool default stays `true`.)*
 15. **OQ15** Should the `nft-gate` gateways also honour `pause_blocks_decryption` (i.e. deny relay
     access with existing passes while a gate is paused), or does it stay Seal-only as named?
+    *(2026-09-28, owner: make it optional and independent — F29's `pause_blocks_access`.)*
+16. **OQ16** Are the default platform terms right for Meddleware's deployment — 0.2% with a 0.001 SUI
+    floor (minimum paid price 0.01 SUI) and a 0.1 SUI free-gate fee? All are adjustable on-chain
+    without a republish (F26, F27).
 
 ## Risks (residual)
 
@@ -542,9 +632,13 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
   gates and passes never migrate automatically.
 - **Mutable git tags** remain a supply-chain hazard for any dependant that pins a tag instead of a SHA.
 - **Metadata phishing:** anyone can create gates with arbitrary names/images.
-- **Tool-level policy:** `GatePolicy` and the minimum price are chosen by the creating tool; gates
-  created by calling the contract directly can be unrestricted and dust-priced. Buyers must read the
-  gate's policy, not assume a tool's defaults.
+- **Tool-level policy:** `GatePolicy` is chosen by the creating tool; gates created by calling the
+  contract directly can be unrestricted. Buyers must read the gate's policy, not assume a tool's
+  defaults. (Prices, fees and commission are enforced on-chain for everyone — F26–F28.)
+- **Effective rate on cheap passes:** the commission floor makes the platform's share 10% at the
+  minimum price, falling to the 0.2% rate at 0.5 SUI and above; creators of cheap passes keep 90%.
+- **Revenue depends on coin sweeping:** about half of each minimum-price sale's value to the treasury
+  is the storage deposit of the commission coin, recovered only when the treasury merges its coins.
 - **Commission lock and platform revenue:** a gate that locks its commission at freeze is immune to
   later platform rate changes, in either direction.
 
@@ -562,3 +656,9 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
   `0x692547…` holds only init objects, its UpgradeCap `0x6b6cd7…` live); F4/F19 RESOLVED via
   policy; F25 (dust pricing) RESOLVED at the tool layer (`nft-gate-client` `80f652e`/`4f60283`,
   `access-gate-ui` `e91781a`). 42/42 tests. OQ13–OQ15 added.
+- 2026-09-28 (third pass) — F26 (commission floor, minimum paid price), F27 (free-gate fee), F28
+  (airdrop commission), F29 (`pause_blocks_access`) RESOLVED in `6bdf8a6`; F30 in `nft-gate`
+  `bbf8665`; published fresh as `0x1a81ca…` (`dcd2d3c`) and every stray/superseded UpgradeCap burned
+  (F31). 60/60 tests. OQ13–OQ15 answered; OQ16 added. Live checks: `nft-gate-client` gRPC read tests
+  against the new `PlatformConfig` pass; seal timelock round-trip on the republished `seal_policies`
+  passes.

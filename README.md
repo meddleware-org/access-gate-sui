@@ -19,33 +19,38 @@ to restrict to holders of a specific NFT. It knows nothing about any particular 
   address, so an off-chain verifier can bind one grant to one on-chain consumption. Replay
   protection (nonce uniqueness and freshness) is the verifier's job — see
   [SECURITY.md](SECURITY.md) and [docs/onchain/dev-guide.md](docs/onchain/dev-guide.md).
-- **Platform commission** — a shared `PlatformConfig` routes `commission_bps` (≤ 10%, default
-  0.2%) of every paid purchase to the platform treasury.
+- **Platform commission and fees** — a shared `PlatformConfig` routes the commission on every paid
+  mint (0.2% by default, never less than `min_commission_mist` — 0.001 SUI — and never more than 10%
+  of the price) to the platform treasury, and charges a one-off `free_gate_fee_mist` (0.1 SUI) to
+  make a gate free. Airdrops pay the commission too.
 
 ## Quick start
 
 ```bash
-sui move test --build-env testnet   # 42 unit tests
+sui move test --build-env testnet   # 60 unit tests
 ./scripts/publish.sh testnet --create-gate   # publish + bootstrap a first gate
 ```
 
-`--create-gate` reads `GATE_PRICE_MIST`, `GATE_PAYMENT_RECIPIENT`, `GATE_DEFAULT_USES`,
-`GATE_SOULBOUND`, `GATE_AUTO_BURN` (all optional). IDs and the NFT type string are written
+`--create-gate` reads `GATE_PRICE_MIST` (0 = free gate, paying the free-gate fee),
+`GATE_PAYMENT_RECIPIENT`, `GATE_DEFAULT_USES`, `GATE_SOULBOUND`, `GATE_AUTO_BURN`, the NFT display
+fields and the four `GATE_*` policy flags (all optional). IDs and the NFT type string are written
 to `.env.<network>` for the gateway and frontend to consume.
 
 ## Entry points
 
 | Function | Auth | Purpose |
 | --- | --- | --- |
-| `create_gate(price_mist, payment_recipient, default_uses, soulbound, auto_burn_at_zero, nft_name, nft_image_url, nft_description)` | permissionless | Share a `Gate` (unrestricted default policy), grant the caller an `AdminCap`. |
-| `create_gate_with_policy(…, policy: GatePolicy)` + `new_gate_policy(freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption)` | permissionless | As `create_gate`, with an immutable per-gate policy. |
+| `create_gate(platform, price_mist, payment_recipient, default_uses, soulbound, auto_burn_at_zero, nft_name, nft_image_url, nft_description, policy)` | permissionless | Share a paid `Gate` (price ≥ `min_paid_price_mist`), grant the caller an `AdminCap`. |
+| `create_free_gate(platform, payment, payment_recipient, …, policy)` | permissionless | As above for a free gate, paying the free-gate fee. |
+| `new_gate_policy(freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption, pause_blocks_access)` / `default_gate_policy()` | — | Build the immutable per-gate policy. |
 | `purchase(gate, platform: &PlatformConfig, payment: Coin<SUI>)` | permissionless | Pay the price (commission split), mint the NFT to sender, refund overpayment. |
 | `consume(nft, gate, nonce)` / `consume_soulbound(...)` | NFT owner (by value) | Spend one use; emit `AccessConsumedEvent{nonce, consumer}`; burn-at-zero if the gate opts in, else keep as receipt. |
-| `airdrop(cap, gate, recipient)` | `AdminCap` | Free grant. |
+| `airdrop(cap, gate, platform, payment, recipient)` | `AdminCap` | Grant a pass; the admin pays the commission a sale would carry. |
 | `burn(nft)` / `burn_soulbound(nft)` | NFT owner | Voluntary destroy. |
-| `set_price` / `set_paused` / `set_payment_recipient` / `set_default_uses` / `set_soulbound` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` | `AdminCap` | Reconfigure the gate. |
+| `set_price(cap, gate, platform, price)` / `make_gate_free(cap, gate, platform, payment)` | `AdminCap` | Re-price (paid ≥ minimum; 0 only once the free-gate fee is paid). |
+| `set_paused` / `set_payment_recipient` / `set_default_uses` / `set_soulbound` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` | `AdminCap` | Reconfigure the gate. |
 | `make_gate_immutable(cap, gate, platform: &PlatformConfig)` | `AdminCap` (consumed) | Irreversibly freeze the gate's config (refused while paused if the policy says so; snapshots the commission if the policy locks it). |
-| `set_platform_treasury` / `set_commission_bps` | `PlatformAdminCap` | Platform commission routing / rate (≤ 1000 bps). |
+| `set_platform_treasury` / `set_commission_bps` / `set_min_commission_mist` / `set_free_gate_fee_mist` | `PlatformAdminCap` | Platform treasury and terms (rate ≤ 1000 bps). |
 
 The full reference (objects, events, abort codes, views) is in
 [docs/onchain/api-reference.md](docs/onchain/api-reference.md).
@@ -53,7 +58,8 @@ The full reference (objects, events, abort codes, views) is in
 ## Events
 
 `GateCreatedEvent`, `AccessMintedEvent`, `AccessConsumedEvent` (carries `nonce` + `consumer`),
-`AccessBurnedEvent`, `GateFrozenEvent` (carries the locked commission, if any). Off-chain indexers subscribe to these; the consume event's `nonce` is
+`AccessBurnedEvent`, `GateFrozenEvent` (carries the locked commission terms, if any),
+`GateMadeFreeEvent`, `PlatformConfigUpdatedEvent`. Off-chain indexers subscribe to these; the consume event's `nonce` is
 the binding key for single-use verification.
 
 ## Consuming this package as a dependency

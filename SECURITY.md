@@ -5,10 +5,11 @@
 This policy covers security issues in:
 
 - The Move package (`sources/access_gate.move`) — capability forgery or cross-gate reuse,
-  double-spend of a single-use pass, soulbound-transfer escape, commission/payment mis-routing,
+  double-spend of a single-use pass, soulbound-transfer escape, commission/fee/payment mis-routing or evasion,
   arithmetic over/underflow, or a bypass of the gate-freeze (immutability) guard
 - The published testnet package at
-  `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d`
+  `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4` (and the superseded
+  `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d` while gates on it are live)
 - The deployment scripts (`scripts/publish.sh`) as they affect capability custody
 
 It does not cover:
@@ -36,24 +37,29 @@ treated as high severity:
    on-chain.
 3. **Soulbound NFTs are non-transferable.** `SoulboundAccessNFT` has `key` without `store`, so
    `public_transfer` does not type-check; only in-module consume/burn can move or destroy it.
-4. **Commission is bounded and exact.** `commission_bps` is capped at 1000 (10%,
-   `E_COMMISSION_TOO_HIGH`); the commission is computed in u128 so no price can overflow, rounds
-   **down** (below `10000 / commission_bps` MIST it is zero), and the operator share cannot
+4. **Commission is bounded and exact.** A paid mint pays `max(price × bps / 10000, min_commission)`,
+   never more than 10% of the price (`commission_bps` itself is capped at 1000,
+   `E_COMMISSION_TOO_HIGH`); computed in u128 so no price can overflow, and the operator share cannot
    underflow. The platform treasury can never be set to the zero address (`E_ZERO_ADDRESS`).
-5. **A frozen gate's config is immutable.** After `make_gate_immutable`, every setter and `airdrop`
+5. **The platform is always paid.** A paid price is at least `min_paid_price_mist`
+   (`E_PRICE_TOO_LOW`); a price of 0 requires the free-gate fee (`E_FREE_FEE_UNPAID`); every
+   purchase and airdrop of a paid gate carries the commission.
+6. **A frozen gate's config is immutable.** After `make_gate_immutable`, every setter and `airdrop`
    aborts (`E_GATE_FROZEN`); the freeze is irreversible.
-6. **A gate's policy is immutable and honoured.** `GatePolicy` is fixed at creation (no setter);
-   `freeze_requires_unpaused` makes a paused freeze abort (`E_FREEZE_WHILE_PAUSED`), and a commission
-   locked at freeze is the only rate ever applied to that gate's purchases.
+7. **A gate's policy is immutable and honoured.** `GatePolicy` is fixed at creation (no setter);
+   `freeze_requires_unpaused` makes a paused freeze abort (`E_FREEZE_WHILE_PAUSED`),
+   `pause_blocks_access` makes `consume` abort while paused, and commission terms locked at freeze
+   are the only terms ever applied to that gate.
 
 ## Versioning and immutability
 
 The intended policy is that each published version is **permanently immutable**: the `UpgradeCap`
 is burned via `scripts/publish.sh --make-immutable` (`0x2::package::make_immutable`), after which the
-package bytecode and module semantics can never change. **Current state:** the canonical testnet
-package `0x0bedd0…` still has a live `UpgradeCap` (`0x1ab9a455…4e89`, compatible policy, held by the
-publisher EOA) — burning it, or moving it to a multisig, is a pre-mainnet gate in the audit
-(`docs/audit/access-gate-sui-audit.md`).
+package bytecode and module semantics can never change. **Current state:** the testnet package
+`0x1a81ca…` has a live `UpgradeCap` (`0xf04a1d87…32bc`, compatible policy, held by the publisher
+EOA) — burning it or moving it to a multisig is an operator requirement before launch in the audit
+(`docs/audit/access-gate-sui-audit.md`). The superseded `0x0bedd0…` and the stray test publishes are
+immutable (their caps were burned on 2026-09-28).
 
 **Future protocol changes ship as a new package at a new address.** The old version and all its
 gates, NFTs, and `PlatformConfig` remain valid forever. No one is forced to migrate.

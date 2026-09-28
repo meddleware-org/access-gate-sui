@@ -8,7 +8,8 @@ How to integrate with `access_gate` on-chain: building transactions, reading sta
 passes, and consuming single-use passes **replay-safely**. For every function, type, event and abort
 code see the [API reference](api-reference.md).
 
-Package (testnet, canonical): `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d`.
+Package (testnet): `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4`, `PlatformConfig`
+`0xe3b949cabe9a0574c03dfc924fb3f96e6f959f2bb86d053ed6229a241c3a23f7`.
 The TypeScript builders live in `@meddleware/nft-gate-client`; the examples below use
 `@mysten/sui` directly so the on-chain contract is explicit.
 
@@ -36,30 +37,35 @@ These are requirements, not suggestions. They mirror the package audit's normati
 5. **Route to the package that minted the pass.** A pass of package `0xA…` can only be consumed by
    `0xA…::access_gate::consume`. Subscribe to events from every package address you trust.
 
-## Creating a gate with a policy (PTB)
+## Creating a gate (PTB)
 
-Tools that want restrictions build a `GatePolicy` and pass it to `create_gate_with_policy` in the
-same PTB (policy-aware package versions only — see the API reference's version note):
+Every gate is created with an immutable `GatePolicy`, built in the same PTB:
 
 ```ts
 const [policy] = tx.moveCall({
   target: `${PKG}::access_gate::new_gate_policy`,
-  arguments: [tx.pure.bool(freezeRequiresUnpaused), tx.pure.bool(lockCommissionOnFreeze), tx.pure.bool(pauseBlocksDecryption)],
+  arguments: [
+    tx.pure.bool(freezeRequiresUnpaused), tx.pure.bool(lockCommissionOnFreeze),
+    tx.pure.bool(pauseBlocksDecryption), tx.pure.bool(pauseBlocksAccess),
+  ],
 })
+// Paid gate: price must be ≥ min_paid_price_mist(platform) (0.01 SUI by default), else abort 11.
 tx.moveCall({
-  target: `${PKG}::access_gate::create_gate_with_policy`,
-  arguments: [/* the 8 create_gate values */ ...values, policy],
+  target: `${PKG}::access_gate::create_gate`,
+  arguments: [tx.object(PLATFORM_CONFIG_ID), tx.pure.u64(priceMist), /* recipient, uses, soulbound,
+    auto-burn, name, image url, description */ ...values, policy],
 })
+// Free gate instead: pay the platform's free_gate_fee_mist.
+// const [fee] = tx.splitCoins(tx.gas, [tx.pure.u64(freeGateFeeMist)])
+// tx.moveCall({ target: `${PKG}::access_gate::create_free_gate`,
+//   arguments: [tx.object(PLATFORM_CONFIG_ID), fee, ...values, policy] })
 ```
 
-`@meddleware/nft-gate-client`'s `buildCreateGateTx(pkg, { …, policy })` does this, and falls back to
-`create_gate` for the all-`false` policy. Freezing takes the shared `PlatformConfig` as a third
-argument (`buildMakeGateImmutableTx(ctx, platformConfigId)`).
-
-**Minimum useful price.** Commission rounds down, so a non-zero price below
-`⌈10000 / commission_bps⌉` MIST (500 MIST at 20 bps) pays the platform nothing. Tools SHOULD
-enforce that floor for paid gates (`minimumProfitablePriceMist` in the client); the contract does
-not.
+`@meddleware/nft-gate-client`'s `buildCreateGateTx(pkg, platformConfigId, { …, policy,
+freeGateFeeMist })` does this; read the terms with `fetchPlatformConfig`. Admin calls that depend on
+the platform terms — `set_price`, `make_gate_free`, `airdrop` (pays the commission) and
+`make_gate_immutable` — take the shared `PlatformConfig`; the client builders read it from
+`GateAdminContext.platformConfigId`.
 
 ## Buying a pass (PTB)
 

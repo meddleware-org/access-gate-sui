@@ -18,8 +18,8 @@ particular consumer.
 | `AdminCap` | owned (gate creator) | Authority over exactly one gate: change settings, airdrop, freeze. |
 | `AccessNFT` | owned, **transferable** | A pass that can be sent or traded. |
 | `SoulboundAccessNFT` | owned, **non-transferable** | A pass bound to the wallet that received it. |
-| `PlatformConfig` | shared (one per package) | Platform treasury address and commission rate (≤ 10%). |
-| `PlatformAdminCap` | owned (platform operator) | Authority to change the platform treasury and commission. |
+| `PlatformConfig` | shared (one per package) | Platform treasury, commission terms (rate + minimum) and the free-gate fee. |
+| `PlatformAdminCap` | owned (platform operator) | Authority to change the platform treasury, commission terms and free-gate fee. |
 
 ## Pass flavours
 
@@ -30,9 +30,18 @@ particular consumer.
 ## Money flow
 
 `purchase` is permissionless and atomic: the buyer pays at least the gate price; the platform
-commission (`commission_bps`, default 0.2%, capped at 10%, rounded down) goes to the platform
-treasury, the rest to the gate's payment recipient, any overpayment is refunded, and the pass is
-minted to the buyer — all in one transaction.
+commission goes to the platform treasury, the rest to the gate's payment recipient, any overpayment
+is refunded, and the pass is minted to the buyer — all in one transaction.
+
+- **Commission:** 0.2% of the price by default, but never less than 0.001 SUI and never more than
+  10% of the price. A paid gate therefore costs at least 0.01 SUI.
+- **Free gates** (price 0) pay a one-off platform fee (0.1 SUI by default) when they are created or
+  made free; after that, passes are free to claim.
+- **Airdrops** (passes granted by the gate's admin) pay the same commission a purchase would, so a
+  gate cannot sell off-chain and grant on-chain to avoid it.
+
+The platform operator sets these terms in `PlatformConfig`; see the
+[API reference](api-reference.md#commission-and-fees).
 
 ## Trust boundaries (summary)
 
@@ -40,12 +49,15 @@ minted to the buyer — all in one transaction.
   commission cap.
 - A **gate creator** controls their own gate until they freeze it (`make_gate_immutable`), which is
   irreversible.
-- The **platform operator** can change the treasury and commission (≤ 10%) for every gate of this
-  package, including frozen ones — except frozen gates whose policy locked the commission.
-- Each gate carries an immutable **policy** chosen at creation (freeze-while-paused, commission lock,
-  pause blocks decryption); the tool that creates a gate decides it, and buyers can read it.
+- The **platform operator** can change the treasury and commission terms (never above 10% of a
+  price) for every gate of this package, including frozen ones — except frozen gates whose policy
+  locked the commission.
+- Each gate carries an immutable **policy** chosen at creation (no freezing while paused, commission
+  lock, pause blocks decryption, pause blocks access); the tool that creates a gate decides it, and
+  buyers can read it.
 - **Off-chain services** that accept passes are responsible for replay protection when they rely on
   single-use consumption — see the [developer guide](dev-guide.md).
 
-Deployed testnet package: `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d`
-(canonical; used by every Meddleware app; predates gate policies). Mainnet: not yet published.
+Deployed testnet package: `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4`
+(`PlatformConfig` `0xe3b949cabe9a0574c03dfc924fb3f96e6f959f2bb86d053ed6229a241c3a23f7`). The
+superseded `0x0bedd0…` still serves gates created on it. Mainnet: not yet published.

@@ -14,7 +14,8 @@ Consumers (a gateway, a frontend, a contract) compose on top.
 
 - **`Gate` (shared)** — the access class. Config: `price_mist`, `payment_recipient`,
   `default_uses` (0 ⇒ unlimited pass, N ⇒ single-use with N), `soulbound`,
-  `auto_burn_at_zero`, `paused`. `admin_cap_id` records the authorised cap (auth is by
+  `auto_burn_at_zero`, `paused`, immutable `policy`, `locked_commission`, `free_fee_paid`.
+  `admin_cap_id` records the authorised cap (auth is by
   `cap.gate_id == object::id(gate)`, checked in `assert_admin`).
 - **`AccessNFT has key, store`** vs **`SoulboundAccessNFT has key`** — the presence/absence
   of `store` is the *entire* soulbound mechanism: without `store`, `public_transfer` cannot
@@ -40,26 +41,32 @@ Consumers (a gateway, a frontend, a contract) compose on top.
    emitted with the id, then `id.delete()`.
 6. **Commission arithmetic never overflows** — `commission_for` multiplies in u128 and rounds
    down; `commission_bps` ≤ 1000; the platform treasury is never `@0x0`.
-7. **`GatePolicy` is immutable per gate** — set by `create_gate`/`create_gate_with_policy`, no
-   setter. `purchase` uses `effective_commission_bps` (freeze snapshot if locked, else live rate).
-   `pause_blocks_decryption` is enforced by dependants (`seal_policies::nft_gate`), not here.
+7. **`GatePolicy` is immutable per gate** — set by `create_gate`/`create_free_gate`, no setter.
+   Mints use `effective_commission_terms` (freeze snapshot if locked, else live terms).
+   `pause_blocks_access` is enforced here (`consume` aborts) and by gateways;
+   `pause_blocks_decryption` only by dependants (`seal_policies::nft_gate`).
+8. **The platform is always paid** — commission = `max(bps share, min_commission)` capped at 10%;
+   paid price ≥ `min_paid_price_mist`; price 0 only after the free-gate fee; airdrops pay the
+   commission.
 
 ## Error codes
 
 `E_PAUSED=1`, `E_INSUFFICIENT_PAYMENT=2`, `E_NOT_SINGLE_USE=3`, `E_NO_USES_REMAINING=4`,
 `E_WRONG_GATE=5`, `E_GATE_FROZEN=6`, `E_COMMISSION_TOO_HIGH=7`, `E_INVALID_NONCE=8`,
-`E_ZERO_ADDRESS=9`, `E_FREEZE_WHILE_PAUSED=10`.
+`E_ZERO_ADDRESS=9`, `E_FREEZE_WHILE_PAUSED=10`, `E_PRICE_TOO_LOW=11`, `E_FREE_FEE_UNPAID=12`.
 Tests reference these by literal in `#[expected_failure(abort_code = …)]` because
 module-private constants are not cross-module referenceable in that attribute — keep the
 literal and the constant in sync if you renumber.
 
 ## Testing
 
-`sui move test --build-env testnet` — 42 tests (`tests/access_gate_tests.move`): `init` defaults,
+`sui move test --build-env testnet` — 60 tests (`tests/access_gate_tests.move`): `init` defaults,
 gate creation, purchase (exact/overpay/free/underpay/paused, commission split, u64::MAX price at
 the 10% cap, dust rounding), single-use decrement + receipt vs auto-burn, every abort code on both
 the transferable and soulbound paths, foreign-cap and frozen-gate guards, platform setters, voluntary
-burns. Every abort code has an `expected_failure` test — keep it that way for new entries/branches.
+burns, gate policies, the commission floor/cap, minimum price, free-gate fee paths and airdrop
+commission. Every abort code has an `expected_failure` test — keep it that way for new
+entries/branches.
 
 ## Working rules
 
