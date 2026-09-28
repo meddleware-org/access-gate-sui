@@ -30,6 +30,8 @@
 #   GAS_BUDGET             default 200000000
 # -----------------------------------------------------------------------------
 set -euo pipefail
+
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >&2; }
 trap 'log "ERROR: publish.sh failed at line $LINENO (exit $?)."' ERR
 
 PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,23 +39,26 @@ PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Require explicit network argument.
 if [ -z "${1:-}" ]; then
     log "ERROR: network argument required."
-    log "Usage: ./scripts/publish.sh <localnet|testnet|mainnet> [--create-gate]"
+    log "Usage: ./scripts/publish.sh <localnet|testnet|mainnet> [--create-gate] [--make-immutable]"
     exit 1
 fi
 NETWORK="$1"
+case "$NETWORK" in
+    localnet|testnet|mainnet) ;;
+    *) log "ERROR: unknown network '${NETWORK}' (expected localnet|testnet|mainnet)."; exit 1 ;;
+esac
 CREATE_GATE=""
 MAKE_IMMUTABLE=""
 for _arg in "${@:2}"; do
     case "$_arg" in
         --create-gate)    CREATE_GATE="--create-gate" ;;
         --make-immutable) MAKE_IMMUTABLE="--make-immutable" ;;
+        *) log "ERROR: unknown flag '${_arg}' (a typo must not silently skip --make-immutable)."; exit 1 ;;
     esac
 done
 unset _arg
 GAS_BUDGET="${GAS_BUDGET:-200000000}"
 ENV_FILE="$PKG_DIR/.env.${NETWORK}"
-
-log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >&2; }
 
 command -v jq >/dev/null || { log "ERROR: jq is required"; exit 1; }
 
@@ -93,19 +98,28 @@ fi
 # Find the line that starts with '{' and take everything from there
 PUBLISH_JSON_CLEAN=$(echo "$PUBLISH_JSON" | awk '/^{/,0')
 
-# Handle both regular publish (objectChanges) and test-publish (effects.created) formats
-if echo "$PUBLISH_JSON_CLEAN" | jq -e '.objectChanges' > /dev/null 2>&1; then
-    # Regular publish format (testnet/mainnet)
-    PACKAGE_ID=$(echo "$PUBLISH_JSON_CLEAN" | jq -r '.objectChanges[] | select(.type=="published") | .packageId')
-    UPGRADE_CAP_ID=$(echo "$PUBLISH_JSON_CLEAN" | jq -r '.objectChanges[] | select(.objectType? and (.objectType|test("::package::UpgradeCap$"))) | .objectId')
-else
-    # test-publish format (localnet): package is the first immutable object created
-    PACKAGE_ID=$(echo "$PUBLISH_JSON_CLEAN" | jq -r '.effects.created[] | select(.owner=="Immutable") | .reference.objectId' | head -1)
-    # For test-publish, upgrade cap is typically the second created object (owned by sender)
-    UPGRADE_CAP_ID=$(echo "$PUBLISH_JSON_CLEAN" | jq -r '.effects.created[] | select(.owner | type=="object") | .reference.objectId' | head -1)
-fi
-
+# Both `publish` and `test-publish` return typed `objectChanges`. Extract every authority object
+# by its EXACT type (no positional heuristics) so downstream custody tooling moves the right IDs.
+echo "$PUBLISH_JSON_CLEAN" | jq -e '.objectChanges' > /dev/null 2>&1 \
+    || { log "ERROR: publish output has no objectChanges; refusing to guess object IDs."; exit 1; }
+PACKAGE_ID=$(echo "$PUBLISH_JSON_CLEAN" | jq -r '.objectChanges[] | select(.type=="published") | .packageId')
 [ -n "$PACKAGE_ID" ] && [ "$PACKAGE_ID" != "null" ] || { log "ERROR: could not parse packageId"; exit 1; }
+
+# created_id <exact objectType> — the single created object of that type (empty if none).
+created_id() {
+    echo "$PUBLISH_JSON_CLEAN" | jq -r --arg t "$1" \
+        '[.objectChanges[] | select(.type=="created" and .objectType==$t) | .objectId] | if length==1 then .[0] else "" end'
+}
+UPGRADE_CAP_ID=$(created_id "0x2::package::UpgradeCap")
+PUBLISHER_ID=$(created_id "0x2::package::Publisher")
+PLATFORM_ADMIN_CAP_ID=$(created_id "${PACKAGE_ID}::access_gate::PlatformAdminCap")
+PLATFORM_CONFIG_ID=$(created_id "${PACKAGE_ID}::access_gate::PlatformConfig")
+DISPLAY_ACCESS_NFT_ID=$(created_id "0x2::display::Display<${PACKAGE_ID}::access_gate::AccessNFT>")
+DISPLAY_SOULBOUND_NFT_ID=$(created_id "0x2::display::Display<${PACKAGE_ID}::access_gate::SoulboundAccessNFT>")
+for _v in UPGRADE_CAP_ID PUBLISHER_ID PLATFORM_ADMIN_CAP_ID PLATFORM_CONFIG_ID DISPLAY_ACCESS_NFT_ID DISPLAY_SOULBOUND_NFT_ID; do
+    [ -n "${!_v}" ] || { log "ERROR: could not find exactly one created object for ${_v}"; exit 1; }
+done
+unset _v
 
 ACCESS_NFT_TYPE="${PACKAGE_ID}::access_gate::AccessNFT"
 SOULBOUND_NFT_TYPE="${PACKAGE_ID}::access_gate::SoulboundAccessNFT"
@@ -113,6 +127,11 @@ SOULBOUND_NFT_TYPE="${PACKAGE_ID}::access_gate::SoulboundAccessNFT"
 {
   echo "ACCESS_GATE_PACKAGE_ID=$PACKAGE_ID"
   echo "ACCESS_GATE_UPGRADE_CAP_ID=$UPGRADE_CAP_ID"
+  echo "ACCESS_GATE_PUBLISHER_ID=$PUBLISHER_ID"
+  echo "ACCESS_GATE_PLATFORM_ADMIN_CAP_ID=$PLATFORM_ADMIN_CAP_ID"
+  echo "ACCESS_GATE_PLATFORM_CONFIG_ID=$PLATFORM_CONFIG_ID"
+  echo "ACCESS_GATE_DISPLAY_ACCESS_NFT_ID=$DISPLAY_ACCESS_NFT_ID"
+  echo "ACCESS_GATE_DISPLAY_SOULBOUND_NFT_ID=$DISPLAY_SOULBOUND_NFT_ID"
   echo "ACCESS_NFT_TYPE=$ACCESS_NFT_TYPE"
   echo "SOULBOUND_NFT_TYPE=$SOULBOUND_NFT_TYPE"
 } > "$ENV_FILE"

@@ -15,9 +15,11 @@ It does not cover:
 
 - The Sui framework or Move standard library (report to the
   [Sui project](https://github.com/MystenLabs/sui/security))
-- The **off-chain verifier's** replay discipline — the on-chain `AccessConsumedEvent` `nonce` is
-  caller-supplied and unvalidated by design; a gateway that grants access must bind the consumption
-  to `(gate_id, nft_id, sender, server-issued nonce)` and enforce uniqueness itself
+- The **off-chain verifier's** replay discipline — on-chain, `consume` only enforces a minimum
+  nonce length (≥ 8 bytes, `E_INVALID_NONCE`) and records `consumer` (the sender) in
+  `AccessConsumedEvent`; it does **not** enforce nonce uniqueness or freshness. A gateway that grants
+  access MUST bind the consumption to `(gate_id, nft_id, consumer, server-issued nonce, consume tx
+  digest)`, accept each nonce once, and enforce its own freshness window
 - Operator key custody of the `PlatformAdminCap`, `Publisher`, `Display`, or `UpgradeCap` (these are
   deployment/operational decisions — see the audit's pre-mainnet gate)
 
@@ -34,16 +36,21 @@ treated as high severity:
    on-chain.
 3. **Soulbound NFTs are non-transferable.** `SoulboundAccessNFT` has `key` without `store`, so
    `public_transfer` does not type-check; only in-module consume/burn can move or destroy it.
-4. **Commission is bounded.** `commission_bps` is capped at 1000 (10%, `E_COMMISSION_TOO_HIGH`);
-   the split math cannot overflow at realistic values, and the operator share cannot underflow.
+4. **Commission is bounded and exact.** `commission_bps` is capped at 1000 (10%,
+   `E_COMMISSION_TOO_HIGH`); the commission is computed in u128 so no price can overflow, rounds
+   **down** (below `10000 / commission_bps` MIST it is zero), and the operator share cannot
+   underflow. The platform treasury can never be set to the zero address (`E_ZERO_ADDRESS`).
 5. **A frozen gate's config is immutable.** After `make_gate_immutable`, every setter and `airdrop`
    aborts (`E_GATE_FROZEN`); the freeze is irreversible.
 
 ## Versioning and immutability
 
-Each published version of this package is **permanently immutable**: the `UpgradeCap` is burned on
-publish via `scripts/publish.sh --make-immutable` (`0x2::package::make_immutable`). Once burned, the
-package bytecode and module semantics can never change.
+The intended policy is that each published version is **permanently immutable**: the `UpgradeCap`
+is burned via `scripts/publish.sh --make-immutable` (`0x2::package::make_immutable`), after which the
+package bytecode and module semantics can never change. **Current state:** the canonical testnet
+package `0x0bedd0…` still has a live `UpgradeCap` (`0x1ab9a455…4e89`, compatible policy, held by the
+publisher EOA) — burning it, or moving it to a multisig, is a pre-mainnet gate in the audit
+(`docs/audit/access-gate-sui-audit.md`).
 
 **Future protocol changes ship as a new package at a new address.** The old version and all its
 gates, NFTs, and `PlatformConfig` remain valid forever. No one is forced to migrate.

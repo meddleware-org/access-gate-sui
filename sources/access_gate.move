@@ -49,7 +49,7 @@
 /// wants to guarantee to users that a gate can never change may **renounce** governance
 /// with `make_gate_immutable`, which consumes the `AdminCap` and sets `Gate.frozen = true`
 /// (mirroring `0x2::package::make_immutable` for a package's `UpgradeCap`). This is
-/// **irreversible** and also ends `airdrop`/`mint_to`, so grant everything first, then
+/// **irreversible** and also ends `airdrop`, so grant everything first, then
 /// freeze. `gate_is_frozen` lets a UI/verifier read the locked state on-chain.
 ///
 /// ## Platform commission
@@ -108,6 +108,9 @@ const E_COMMISSION_TOO_HIGH: u64 = 7;
 /// `consume` was called with a nonce shorter than `MIN_NONCE_LENGTH` bytes.
 const E_INVALID_NONCE: u64 = 8;
 
+/// `set_platform_treasury` was called with the zero address (commission would be unrecoverable).
+const E_ZERO_ADDRESS: u64 = 9;
+
 /// Minimum nonce length (bytes). Enforced by `consume_data`; ensures the server-issued
 /// challenge carries enough entropy to be meaningful as a replay guard.
 const MIN_NONCE_LENGTH: u64 = 8;
@@ -124,6 +127,11 @@ public struct PlatformConfig has key {
     /// Hard cap: 1000 bps (10%) — enforced by `set_commission_bps`.
     commission_bps: u64,
 }
+
+/// Maximum `commission_bps` (10%). `set_commission_bps` aborts above it.
+const MAX_COMMISSION_BPS: u64 = 1000;
+/// Basis-point denominator.
+const BPS_DENOMINATOR: u64 = 10000;
 
 /// Capability authorising updates to `PlatformConfig`.
 /// Transferred to the package publisher in `init`.
@@ -364,7 +372,7 @@ public fun purchase(
     assert!(payment.value() >= gate.price_mist, E_INSUFFICIENT_PAYMENT);
 
     if (gate.price_mist > 0) {
-        let commission = gate.price_mist * platform.commission_bps / 10000;
+        let commission = commission_for(gate.price_mist, platform.commission_bps);
         let operator_share = gate.price_mist - commission;
         if (commission > 0) {
             let commission_coin = payment.split(commission, ctx);
@@ -426,6 +434,14 @@ fun mint_and_transfer(gate: &Gate, recipient: address, ctx: &mut TxContext) {
         });
         transfer::public_transfer(nft, recipient);
     }
+}
+
+/// Commission owed on `price_mist` at `commission_bps`, rounded **down** (the remainder stays
+/// with the operator). The product is computed in u128 so no `price_mist` can overflow; the
+/// result is ≤ `price_mist` because `commission_bps` ≤ `MAX_COMMISSION_BPS` < `BPS_DENOMINATOR`.
+/// Below `BPS_DENOMINATOR / commission_bps` MIST the commission rounds to zero (dust floor).
+fun commission_for(price_mist: u64, commission_bps: u64): u64 {
+    ((price_mist as u128) * (commission_bps as u128) / (BPS_DENOMINATOR as u128)) as u64
 }
 
 fun new_variant(default_uses: u64): AccessVariant {
@@ -555,7 +571,8 @@ fun assert_admin_mutable(cap: &AdminCap, gate: &Gate) {
 
 /// Renounce governance and make the gate **immutable**: sets `frozen = true`, emits
 /// `GateFrozenEvent`, and permanently destroys the `AdminCap`. Irreversible. After this,
-/// no setter or `airdrop`/`mint_to` can run; `purchase`/`consume` remain permissionless.
+/// no setter or `airdrop` can run; `purchase`/`consume` remain permissionless. Freezing a
+/// **paused** gate locks `purchase` off forever — unpause first unless that is intended.
 /// Perform any final `set_*`/`airdrop` BEFORE calling this. Mirrors
 /// `0x2::package::make_immutable` for a package's `UpgradeCap`.
 public fun make_gate_immutable(cap: AdminCap, gate: &mut Gate, ctx: &TxContext) {
@@ -596,7 +613,9 @@ public fun set_soulbound(cap: &AdminCap, gate: &mut Gate, soulbound: bool) {
     gate.soulbound = soulbound;
 }
 
-/// Toggle the auto-burn policy for future mints (does not affect already-minted NFTs).
+/// Toggle the auto-burn policy. The flag is read from the gate at `consume` time, so it
+/// applies to **every** single-use NFT of this gate — already-minted ones included — whose
+/// next consume reaches zero.
 public fun set_auto_burn_at_zero(cap: &AdminCap, gate: &mut Gate, auto_burn_at_zero: bool) {
     assert_admin_mutable(cap, gate);
     gate.auto_burn_at_zero = auto_burn_at_zero;
@@ -628,6 +647,7 @@ public fun set_platform_treasury(
     config: &mut PlatformConfig,
     treasury: address,
 ) {
+    assert!(treasury != @0x0, E_ZERO_ADDRESS);
     config.treasury = treasury;
 }
 
@@ -637,7 +657,7 @@ public fun set_commission_bps(
     config: &mut PlatformConfig,
     commission_bps: u64,
 ) {
-    assert!(commission_bps <= 1000, E_COMMISSION_TOO_HIGH);
+    assert!(commission_bps <= MAX_COMMISSION_BPS, E_COMMISSION_TOO_HIGH);
     config.commission_bps = commission_bps;
 }
 
@@ -717,6 +737,13 @@ public fun platform_treasury(config: &PlatformConfig): address { config.treasury
 public fun platform_commission_bps(config: &PlatformConfig): u64 { config.commission_bps }
 
 // ── Test-only helpers ─────────────────────────────────────────────────────────────
+
+#[test_only]
+/// Run `init` in a test scenario (creates Publisher, both Displays, PlatformAdminCap and the
+/// shared PlatformConfig exactly as publish does).
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ACCESS_GATE {}, ctx);
+}
 
 #[test_only]
 /// Mint an extra `AdminCap` bound to `gate` (to exercise the defensive `frozen` guard on
