@@ -41,9 +41,11 @@ minted to the buyer — all in one transaction.
 - A **gate creator** controls their own gate until they freeze it (`make_gate_immutable`), which is
   irreversible.
 - The **platform operator** can change the treasury and commission (≤ 10%) for every gate of this
-  package, including frozen ones.
+  package, including frozen ones — except frozen gates whose policy locked the commission.
+- Each gate carries an immutable **policy** chosen at creation (freeze-while-paused, commission lock,
+  pause blocks decryption); the tool that creates a gate decides it, and buyers can read it.
 - **Off-chain services** that accept passes are responsible for replay protection when they rely on
   single-use consumption — see the [developer guide](dev-guide.md).
 
 Deployed testnet package: `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d`
-(canonical; used by every Meddleware app). Mainnet: not yet published.
+(canonical; used by every Meddleware app; predates gate policies). Mainnet: not yet published.

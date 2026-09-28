@@ -25,7 +25,7 @@ to restrict to holders of a specific NFT. It knows nothing about any particular 
 ## Quick start
 
 ```bash
-sui move test --build-env testnet   # 36 unit tests
+sui move test --build-env testnet   # 42 unit tests
 ./scripts/publish.sh testnet --create-gate   # publish + bootstrap a first gate
 ```
 
@@ -37,13 +37,14 @@ to `.env.<network>` for the gateway and frontend to consume.
 
 | Function | Auth | Purpose |
 | --- | --- | --- |
-| `create_gate(price_mist, payment_recipient, default_uses, soulbound, auto_burn_at_zero, nft_name, nft_image_url, nft_description)` | permissionless | Share a `Gate`, grant the caller an `AdminCap`. |
+| `create_gate(price_mist, payment_recipient, default_uses, soulbound, auto_burn_at_zero, nft_name, nft_image_url, nft_description)` | permissionless | Share a `Gate` (unrestricted default policy), grant the caller an `AdminCap`. |
+| `create_gate_with_policy(…, policy: GatePolicy)` + `new_gate_policy(freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption)` | permissionless | As `create_gate`, with an immutable per-gate policy. |
 | `purchase(gate, platform: &PlatformConfig, payment: Coin<SUI>)` | permissionless | Pay the price (commission split), mint the NFT to sender, refund overpayment. |
 | `consume(nft, gate, nonce)` / `consume_soulbound(...)` | NFT owner (by value) | Spend one use; emit `AccessConsumedEvent{nonce, consumer}`; burn-at-zero if the gate opts in, else keep as receipt. |
 | `airdrop(cap, gate, recipient)` | `AdminCap` | Free grant. |
 | `burn(nft)` / `burn_soulbound(nft)` | NFT owner | Voluntary destroy. |
 | `set_price` / `set_paused` / `set_payment_recipient` / `set_default_uses` / `set_soulbound` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` | `AdminCap` | Reconfigure the gate. |
-| `make_gate_immutable(cap, gate)` | `AdminCap` (consumed) | Irreversibly freeze the gate's config. |
+| `make_gate_immutable(cap, gate, platform: &PlatformConfig)` | `AdminCap` (consumed) | Irreversibly freeze the gate's config (refused while paused if the policy says so; snapshots the commission if the policy locks it). |
 | `set_platform_treasury` / `set_commission_bps` | `PlatformAdminCap` | Platform commission routing / rate (≤ 1000 bps). |
 
 The full reference (objects, events, abort codes, views) is in
@@ -52,7 +53,7 @@ The full reference (objects, events, abort codes, views) is in
 ## Events
 
 `GateCreatedEvent`, `AccessMintedEvent`, `AccessConsumedEvent` (carries `nonce` + `consumer`),
-`AccessBurnedEvent`, `GateFrozenEvent`. Off-chain indexers subscribe to these; the consume event's `nonce` is
+`AccessBurnedEvent`, `GateFrozenEvent` (carries the locked commission, if any). Off-chain indexers subscribe to these; the consume event's `nonce` is
 the binding key for single-use verification.
 
 ## Consuming this package as a dependency

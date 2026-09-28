@@ -42,6 +42,9 @@ treated as high severity:
    underflow. The platform treasury can never be set to the zero address (`E_ZERO_ADDRESS`).
 5. **A frozen gate's config is immutable.** After `make_gate_immutable`, every setter and `airdrop`
    aborts (`E_GATE_FROZEN`); the freeze is irreversible.
+6. **A gate's policy is immutable and honoured.** `GatePolicy` is fixed at creation (no setter);
+   `freeze_requires_unpaused` makes a paused freeze abort (`E_FREEZE_WHILE_PAUSED`), and a commission
+   locked at freeze is the only rate ever applied to that gate's purchases.
 
 ## Versioning and immutability
 

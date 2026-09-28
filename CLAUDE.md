@@ -40,19 +40,22 @@ Consumers (a gateway, a frontend, a contract) compose on top.
    emitted with the id, then `id.delete()`.
 6. **Commission arithmetic never overflows** — `commission_for` multiplies in u128 and rounds
    down; `commission_bps` ≤ 1000; the platform treasury is never `@0x0`.
+7. **`GatePolicy` is immutable per gate** — set by `create_gate`/`create_gate_with_policy`, no
+   setter. `purchase` uses `effective_commission_bps` (freeze snapshot if locked, else live rate).
+   `pause_blocks_decryption` is enforced by dependants (`seal_policies::nft_gate`), not here.
 
 ## Error codes
 
 `E_PAUSED=1`, `E_INSUFFICIENT_PAYMENT=2`, `E_NOT_SINGLE_USE=3`, `E_NO_USES_REMAINING=4`,
 `E_WRONG_GATE=5`, `E_GATE_FROZEN=6`, `E_COMMISSION_TOO_HIGH=7`, `E_INVALID_NONCE=8`,
-`E_ZERO_ADDRESS=9`.
+`E_ZERO_ADDRESS=9`, `E_FREEZE_WHILE_PAUSED=10`.
 Tests reference these by literal in `#[expected_failure(abort_code = …)]` because
 module-private constants are not cross-module referenceable in that attribute — keep the
 literal and the constant in sync if you renumber.
 
 ## Testing
 
-`sui move test --build-env testnet` — 36 tests (`tests/access_gate_tests.move`): `init` defaults,
+`sui move test --build-env testnet` — 42 tests (`tests/access_gate_tests.move`): `init` defaults,
 gate creation, purchase (exact/overpay/free/underpay/paused, commission split, u64::MAX price at
 the 10% cap, dust rounding), single-use decrement + receipt vs auto-burn, every abort code on both
 the transferable and soulbound paths, foreign-cap and frozen-gate guards, platform setters, voluntary

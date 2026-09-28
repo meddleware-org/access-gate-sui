@@ -36,6 +36,31 @@ These are requirements, not suggestions. They mirror the package audit's normati
 5. **Route to the package that minted the pass.** A pass of package `0xA…` can only be consumed by
    `0xA…::access_gate::consume`. Subscribe to events from every package address you trust.
 
+## Creating a gate with a policy (PTB)
+
+Tools that want restrictions build a `GatePolicy` and pass it to `create_gate_with_policy` in the
+same PTB (policy-aware package versions only — see the API reference's version note):
+
+```ts
+const [policy] = tx.moveCall({
+  target: `${PKG}::access_gate::new_gate_policy`,
+  arguments: [tx.pure.bool(freezeRequiresUnpaused), tx.pure.bool(lockCommissionOnFreeze), tx.pure.bool(pauseBlocksDecryption)],
+})
+tx.moveCall({
+  target: `${PKG}::access_gate::create_gate_with_policy`,
+  arguments: [/* the 8 create_gate values */ ...values, policy],
+})
+```
+
+`@meddleware/nft-gate-client`'s `buildCreateGateTx(pkg, { …, policy })` does this, and falls back to
+`create_gate` for the all-`false` policy. Freezing takes the shared `PlatformConfig` as a third
+argument (`buildMakeGateImmutableTx(ctx, platformConfigId)`).
+
+**Minimum useful price.** Commission rounds down, so a non-zero price below
+`⌈10000 / commission_bps⌉` MIST (500 MIST at 20 bps) pays the platform nothing. Tools SHOULD
+enforce that floor for paid gates (`minimumProfitablePriceMist` in the client); the contract does
+not.
+
 ## Buying a pass (PTB)
 
 ```ts
