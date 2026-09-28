@@ -19,7 +19,8 @@
 #                      already creates an ephemeral immutable package).
 #
 # Env for --create-gate (all optional; sensible defaults shown):
-#   GATE_PRICE_MIST        default 0        (free)
+#   GATE_PRICE_MIST        default 0        (free: pays the PlatformConfig free-gate fee from gas;
+#                                            a paid price must be >= the platform minimum)
 #   GATE_PAYMENT_RECIPIENT default = active address
 #   GATE_DEFAULT_USES      default 0        (0 = unlimited pass; N = single-use)
 #   GATE_SOULBOUND         default true
@@ -27,6 +28,9 @@
 #   GATE_NFT_NAME          default "Access Pass"
 #   GATE_NFT_IMAGE_URL     default ""       (set after uploading artwork to Walrus)
 #   GATE_NFT_DESCRIPTION   default ""
+#   GATE_FREEZE_REQUIRES_UNPAUSED / GATE_LOCK_COMMISSION_ON_FREEZE /
+#   GATE_PAUSE_BLOCKS_DECRYPTION / GATE_PAUSE_BLOCKS_ACCESS
+#                          default false    (immutable GatePolicy flags)
 #   GAS_BUDGET             default 200000000
 # -----------------------------------------------------------------------------
 set -euo pipefail
@@ -148,14 +152,39 @@ if [ "$CREATE_GATE" == "--create-gate" ]; then
   NFT_IMAGE_URL="${GATE_NFT_IMAGE_URL:-}"
   NFT_DESCRIPTION="${GATE_NFT_DESCRIPTION:-}"
 
-  log "Creating gate (price=$PRICE recipient=$RECIPIENT uses=$USES soulbound=$SOULBOUND auto_burn=$AUTO_BURN name='$NFT_NAME') ..."
-  GATE_JSON=$(sui client call --json --gas-budget "$GAS_BUDGET" \
-    --package "$PACKAGE_ID" --module access_gate --function create_gate \
-    --args "$PRICE" "$RECIPIENT" "$USES" "$SOULBOUND" "$AUTO_BURN" \
-    "$NFT_NAME" "$NFT_IMAGE_URL" "$NFT_DESCRIPTION")
+  POLICY_ARGS=("${GATE_FREEZE_REQUIRES_UNPAUSED:-false}" "${GATE_LOCK_COMMISSION_ON_FREEZE:-false}" \
+               "${GATE_PAUSE_BLOCKS_DECRYPTION:-false}" "${GATE_PAUSE_BLOCKS_ACCESS:-false}")
+  # PTB string literals must be quoted inside the argument.
+  q() { printf '"%s"' "$1"; }
 
-  GATE_ID=$(echo "$GATE_JSON" | jq -r '.objectChanges[] | select(.objectType? and (.objectType|test("::access_gate::Gate$"))) | .objectId')
-  ADMIN_CAP_ID=$(echo "$GATE_JSON" | jq -r '.objectChanges[] | select(.objectType? and (.objectType|test("::access_gate::AdminCap$"))) | .objectId')
+  log "Creating gate (price=$PRICE recipient=$RECIPIENT uses=$USES soulbound=$SOULBOUND auto_burn=$AUTO_BURN policy=${POLICY_ARGS[*]} name='$NFT_NAME') ..."
+  if [ "$PRICE" = "0" ]; then
+    FEE=$(sui client object "$PLATFORM_CONFIG_ID" --json | jq -r '.content.free_gate_fee_mist // .content.fields.free_gate_fee_mist')
+    [[ "$FEE" =~ ^[0-9]+$ ]] || { log "ERROR: could not read free_gate_fee_mist from $PLATFORM_CONFIG_ID"; exit 1; }
+    log "Free gate: paying the free-gate fee of $FEE MIST."
+    GATE_JSON=$(sui client ptb --gas-budget "$GAS_BUDGET" \
+      --split-coins gas "[$FEE]" --assign fee \
+      --move-call "${PACKAGE_ID}::access_gate::new_gate_policy" "${POLICY_ARGS[@]}" --assign policy \
+      --move-call "${PACKAGE_ID}::access_gate::create_free_gate" "@$PLATFORM_CONFIG_ID" fee.0 "@$RECIPIENT" \
+        "$USES" "$SOULBOUND" "$AUTO_BURN" "$(q "$NFT_NAME")" "$(q "$NFT_IMAGE_URL")" "$(q "$NFT_DESCRIPTION")" policy)
+  else
+    GATE_JSON=$(sui client ptb --gas-budget "$GAS_BUDGET" \
+      --move-call "${PACKAGE_ID}::access_gate::new_gate_policy" "${POLICY_ARGS[@]}" --assign policy \
+      --move-call "${PACKAGE_ID}::access_gate::create_gate" "@$PLATFORM_CONFIG_ID" "$PRICE" "@$RECIPIENT" \
+        "$USES" "$SOULBOUND" "$AUTO_BURN" "$(q "$NFT_NAME")" "$(q "$NFT_IMAGE_URL")" "$(q "$NFT_DESCRIPTION")" policy)
+  fi
+  # `sui client ptb` (CLI 1.80) prints its result as a table even with --json; read each created
+  # object's ID from the "Object Changes" block by its exact type.
+  created_from_table() {
+    echo "$GATE_JSON" | awk -v t="${PACKAGE_ID}::access_gate::$1" '
+      { for (i = 1; i < NF; i++) {
+          if ($i == "ObjectID:") id = $(i + 1)
+          if ($i == "ObjectType:" && $(i + 1) == t) print id
+      } }'
+  }
+  GATE_ID=$(created_from_table Gate)
+  ADMIN_CAP_ID=$(created_from_table AdminCap)
+  [ -n "$GATE_ID" ] && [ -n "$ADMIN_CAP_ID" ] || { log "ERROR: gate transaction output had no Gate/AdminCap:"; log "$GATE_JSON"; exit 1; }
 
   {
     echo "ACCESS_GATE_GATE_ID=$GATE_ID"
