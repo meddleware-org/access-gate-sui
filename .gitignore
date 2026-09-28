@@ -21,3 +21,4 @@ Pub.*.toml
 .idea/
 *.swp
 *.swo
+node_modules/

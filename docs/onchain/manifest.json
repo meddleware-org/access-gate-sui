@@ -1,0 +1,13 @@
+{
+  "$comment": "Canonical on-chain docs manifest. The docs./dev. VitePress sites read this at build time (scripts/gen-onchain.mjs) and copy each page to the sites listed. Links between pages are rewritten per site; links to repo files become GitHub URLs.",
+  "package": "@meddleware/access-gate-sui",
+  "slug": "access-gate",
+  "title": "Access Gate",
+  "repository": "https://github.com/meddleware-org/access-gate-sui",
+  "pages": [
+    { "file": "overview.md", "title": "On-chain overview", "sites": ["docs", "dev"] },
+    { "file": "user-guide.md", "title": "Using passes and gates", "sites": ["docs"] },
+    { "file": "dev-guide.md", "title": "Developer integration", "sites": ["dev"] },
+    { "file": "api-reference.md", "title": "On-chain API reference", "sites": ["dev"] }
+  ]
+}

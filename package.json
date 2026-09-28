@@ -1,0 +1,38 @@
+{
+  "name": "@meddleware/access-gate-sui",
+  "version": "0.0.2",
+  "private": false,
+  "type": "module",
+  "author": "MeddleWare <meddleware@proton.me>",
+  "license": "0BSD",
+  "description": "Generic NFT access-gate primitive for Sui (Move source, canonical on-chain docs, and audit). Consumed by the docs./dev. sites at build time.",
+  "homepage": "https://github.com/meddleware-org/access-gate-sui#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meddleware-org/access-gate-sui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/meddleware-org/access-gate-sui/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "sui move test --build-env testnet"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "Move.toml",
+    "Move.lock",
+    "sources/",
+    "docs/",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.18.0 || >=24.12.0"
+  }
+}
