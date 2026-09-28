@@ -86,5 +86,4 @@ the Move source changes.)
 
 ## License
 
-The repository `LICENSE` file is 0BSD (as is `Move.toml`); the source file headers say CC0-1.0. Which
-licence is intended is an open question in the audit.
+BSD Zero Clause License (`0BSD`) — see [LICENSE](LICENSE).

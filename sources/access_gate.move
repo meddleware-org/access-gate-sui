@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: CC0-1.0
-// This work is dedicated to the public domain under CC0.
+// SPDX-License-Identifier: 0BSD
+// Licensed under the 0BSD license; see the LICENSE file.
 
 /// Generic, reusable NFT access-gate primitive for Sui.
 ///
@@ -51,6 +51,20 @@
 /// (mirroring `0x2::package::make_immutable` for a package's `UpgradeCap`). This is
 /// **irreversible** and also ends `airdrop`, so grant everything first, then
 /// freeze. `gate_is_frozen` lets a UI/verifier read the locked state on-chain.
+///
+/// ## Gate policy (operator-selectable restrictions)
+///
+/// Each gate carries an immutable `GatePolicy`, fixed at creation by whatever tool creates it (the
+/// tool's operator decides which restrictions to apply). Every restriction is OFF by default
+/// (`create_gate` / `default_gate_policy`), so the permissive behaviour is unchanged unless a gate
+/// opts in via `create_gate_with_policy`:
+/// - `freeze_requires_unpaused` — `make_gate_immutable` aborts while the gate is paused, so a gate
+///   can never be frozen into a permanently unsellable state.
+/// - `lock_commission_on_freeze` — freezing snapshots the platform `commission_bps`; purchases on the
+///   frozen gate use that snapshot, so later platform commission changes cannot affect it.
+/// - `pause_blocks_decryption` — a hint for access consumers: dependent policies (e.g. the Seal
+///   `nft_gate` policy) deny access while the gate is paused. This module stores and exposes it; it
+///   does not change `purchase`/`consume`.
 ///
 /// ## Platform commission
 ///
@@ -110,6 +124,8 @@ const E_INVALID_NONCE: u64 = 8;
 
 /// `set_platform_treasury` was called with the zero address (commission would be unrecoverable).
 const E_ZERO_ADDRESS: u64 = 9;
+/// `make_gate_immutable` on a paused gate whose policy has `freeze_requires_unpaused`.
+const E_FREEZE_WHILE_PAUSED: u64 = 10;
 
 /// Minimum nonce length (bytes). Enforced by `consume_data`; ensures the server-issued
 /// challenge carries enough entropy to be meaningful as a replay guard.
@@ -140,6 +156,13 @@ public struct PlatformAdminCap has key, store {
 }
 
 // ── Core data ────────────────────────────────────────────────────────────────
+
+/// Operator-selectable restrictions, fixed per gate at creation (see "Gate policy" above).
+public struct GatePolicy has copy, drop, store {
+    freeze_requires_unpaused: bool,
+    lock_commission_on_freeze: bool,
+    pause_blocks_decryption: bool,
+}
 
 /// Access flavour carried by every access NFT.
 public enum AccessVariant has copy, drop, store {
@@ -208,6 +231,11 @@ public struct Gate has key {
     nft_image_url: String,
     /// Default description copied into each minted NFT.
     nft_description: String,
+    /// Operator-selected restrictions; immutable after creation.
+    policy: GatePolicy,
+    /// Commission snapshot taken at freeze when `policy.lock_commission_on_freeze`; purchases on a
+    /// frozen gate use it instead of the live `PlatformConfig.commission_bps`.
+    locked_commission_bps: Option<u64>,
 }
 
 /// Capability authorising privileged operations on exactly one `Gate`.
@@ -227,6 +255,7 @@ public struct GateCreatedEvent has copy, drop {
     soulbound: bool,
     auto_burn_at_zero: bool,
     nft_name: String,
+    policy: GatePolicy,
     creator: address,
     timestamp_ms: u64,
 }
@@ -266,6 +295,8 @@ public struct AccessBurnedEvent has copy, drop {
 /// Emitted once when a gate is made immutable (its `AdminCap` renounced).
 public struct GateFrozenEvent has copy, drop {
     gate_id: ID,
+    /// The commission snapshot applied from now on, or `none` if the gate follows the live rate.
+    locked_commission_bps: Option<u64>,
     timestamp_ms: u64,
 }
 
@@ -305,9 +336,27 @@ fun init(otw: ACCESS_GATE, ctx: &mut TxContext) {
 
 // ── Gate lifecycle ──────────────────────────────────────────────────────────────
 
-/// Create a new access class. Permissionless: shares the `Gate` and transfers a bound
-/// `AdminCap` to the caller. Display metadata (`nft_name`, `nft_image_url`,
-/// `nft_description`) is copied into every NFT minted from this gate.
+/// The unrestricted policy (every restriction off) — what `create_gate` applies.
+public fun default_gate_policy(): GatePolicy {
+    GatePolicy {
+        freeze_requires_unpaused: false,
+        lock_commission_on_freeze: false,
+        pause_blocks_decryption: false,
+    }
+}
+
+/// Build a `GatePolicy` for `create_gate_with_policy` (callable from a PTB).
+public fun new_gate_policy(
+    freeze_requires_unpaused: bool,
+    lock_commission_on_freeze: bool,
+    pause_blocks_decryption: bool,
+): GatePolicy {
+    GatePolicy { freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption }
+}
+
+/// Create a new access class with the unrestricted default policy. Permissionless: shares the
+/// `Gate` and transfers a bound `AdminCap` to the caller. Display metadata (`nft_name`,
+/// `nft_image_url`, `nft_description`) is copied into every NFT minted from this gate.
 public fun create_gate(
     price_mist: u64,
     payment_recipient: address,
@@ -317,6 +366,33 @@ public fun create_gate(
     nft_name: String,
     nft_image_url: String,
     nft_description: String,
+    ctx: &mut TxContext,
+) {
+    create_gate_with_policy(
+        price_mist,
+        payment_recipient,
+        default_uses,
+        soulbound,
+        auto_burn_at_zero,
+        nft_name,
+        nft_image_url,
+        nft_description,
+        default_gate_policy(),
+        ctx,
+    )
+}
+
+/// `create_gate` with an explicit, immutable `GatePolicy` (build it with `new_gate_policy`).
+public fun create_gate_with_policy(
+    price_mist: u64,
+    payment_recipient: address,
+    default_uses: u64,
+    soulbound: bool,
+    auto_burn_at_zero: bool,
+    nft_name: String,
+    nft_image_url: String,
+    nft_description: String,
+    policy: GatePolicy,
     ctx: &mut TxContext,
 ) {
     let gate_uid = object::new(ctx);
@@ -332,6 +408,7 @@ public fun create_gate(
         soulbound,
         auto_burn_at_zero,
         nft_name,
+        policy,
         creator: ctx.sender(),
         timestamp_ms: ctx.epoch_timestamp_ms(),
     });
@@ -349,6 +426,8 @@ public fun create_gate(
         nft_name,
         nft_image_url,
         nft_description,
+        policy,
+        locked_commission_bps: option::none(),
     };
 
     transfer::share_object(gate);
@@ -372,7 +451,7 @@ public fun purchase(
     assert!(payment.value() >= gate.price_mist, E_INSUFFICIENT_PAYMENT);
 
     if (gate.price_mist > 0) {
-        let commission = commission_for(gate.price_mist, platform.commission_bps);
+        let commission = commission_for(gate.price_mist, effective_commission_bps(gate, platform));
         let operator_share = gate.price_mist - commission;
         if (commission > 0) {
             let commission_coin = payment.split(commission, ctx);
@@ -434,6 +513,13 @@ fun mint_and_transfer(gate: &Gate, recipient: address, ctx: &mut TxContext) {
         });
         transfer::public_transfer(nft, recipient);
     }
+}
+
+/// The commission rate a purchase on `gate` pays: the freeze-time snapshot if the gate locked one,
+/// otherwise the live platform rate.
+public fun effective_commission_bps(gate: &Gate, platform: &PlatformConfig): u64 {
+    if (gate.locked_commission_bps.is_some()) *gate.locked_commission_bps.borrow()
+    else platform.commission_bps
 }
 
 /// Commission owed on `price_mist` at `commission_bps`, rounded **down** (the remainder stays
@@ -571,14 +657,33 @@ fun assert_admin_mutable(cap: &AdminCap, gate: &Gate) {
 
 /// Renounce governance and make the gate **immutable**: sets `frozen = true`, emits
 /// `GateFrozenEvent`, and permanently destroys the `AdminCap`. Irreversible. After this,
-/// no setter or `airdrop` can run; `purchase`/`consume` remain permissionless. Freezing a
-/// **paused** gate locks `purchase` off forever — unpause first unless that is intended.
+/// no setter or `airdrop` can run; `purchase`/`consume` remain permissionless.
+///
+/// Policy-dependent behaviour:
+/// - freezing a **paused** gate is allowed (it then never sells again) unless the gate's policy has
+///   `freeze_requires_unpaused`, in which case this aborts with `E_FREEZE_WHILE_PAUSED`;
+/// - with `lock_commission_on_freeze`, the current `platform.commission_bps` is snapshotted and used
+///   for every later purchase of this gate.
+///
 /// Perform any final `set_*`/`airdrop` BEFORE calling this. Mirrors
 /// `0x2::package::make_immutable` for a package's `UpgradeCap`.
-public fun make_gate_immutable(cap: AdminCap, gate: &mut Gate, ctx: &TxContext) {
+public fun make_gate_immutable(
+    cap: AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    ctx: &TxContext,
+) {
     assert_admin_mutable(&cap, gate);
+    if (gate.policy.freeze_requires_unpaused) assert!(!gate.paused, E_FREEZE_WHILE_PAUSED);
+    if (gate.policy.lock_commission_on_freeze) {
+        gate.locked_commission_bps = option::some(platform.commission_bps);
+    };
     gate.frozen = true;
-    event::emit(GateFrozenEvent { gate_id: object::id(gate), timestamp_ms: ctx.epoch_timestamp_ms() });
+    event::emit(GateFrozenEvent {
+        gate_id: object::id(gate),
+        locked_commission_bps: gate.locked_commission_bps,
+        timestamp_ms: ctx.epoch_timestamp_ms(),
+    });
     let AdminCap { id, gate_id: _ } = cap;
     id.delete();
 }
@@ -714,6 +819,26 @@ public fun gate_is_soulbound(gate: &Gate): bool { gate.soulbound }
 
 /// True if single-use NFTs are auto-deleted when they reach zero uses.
 public fun gate_auto_burn_at_zero(gate: &Gate): bool { gate.auto_burn_at_zero }
+
+/// The gate's immutable policy.
+public fun gate_policy(gate: &Gate): GatePolicy { gate.policy }
+
+/// True if `make_gate_immutable` refuses to freeze this gate while it is paused.
+public fun gate_freeze_requires_unpaused(gate: &Gate): bool { gate.policy.freeze_requires_unpaused }
+
+/// True if freezing snapshots the platform commission for this gate.
+public fun gate_lock_commission_on_freeze(gate: &Gate): bool { gate.policy.lock_commission_on_freeze }
+
+/// True if dependent access policies (e.g. Seal `nft_gate`) must deny access while paused.
+public fun gate_pause_blocks_decryption(gate: &Gate): bool { gate.policy.pause_blocks_decryption }
+
+/// The freeze-time commission snapshot, if this gate locked one.
+public fun gate_locked_commission_bps(gate: &Gate): Option<u64> { gate.locked_commission_bps }
+
+/// `GatePolicy` field accessors (for PTBs / other packages holding a policy value).
+public fun policy_freeze_requires_unpaused(p: &GatePolicy): bool { p.freeze_requires_unpaused }
+public fun policy_lock_commission_on_freeze(p: &GatePolicy): bool { p.lock_commission_on_freeze }
+public fun policy_pause_blocks_decryption(p: &GatePolicy): bool { p.pause_blocks_decryption }
 
 /// Object ID of the `AdminCap` authorised over this gate.
 public fun gate_admin_cap_id(gate: &Gate): ID { gate.admin_cap_id }

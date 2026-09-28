@@ -5,7 +5,7 @@ technical notes are in [CLAUDE.md](CLAUDE.md); these general rules layer under i
 
 ## Package
 
-- Name: `access_gate`; module: `access_gate::access_gate`; edition 2024; CC0-1.0.
+- Name: `access_gate`; module: `access_gate::access_gate`; edition 2024; 0BSD.
 - NFT type strings after publish: `<PACKAGE_ID>::access_gate::AccessNFT` and
   `<PACKAGE_ID>::access_gate::SoulboundAccessNFT`. A verifier filters `getOwnedObjects` by
   the type matching the gate's `soulbound` flag.

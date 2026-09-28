@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: CC0-1.0
-// This work is dedicated to the public domain under CC0.
+// SPDX-License-Identifier: 0BSD
+// Licensed under the 0BSD license; see the LICENSE file.
 
 #[test_only]
 module access_gate::access_gate_tests;
@@ -27,6 +27,29 @@ fun new_gate(
     access_gate::create_gate(
         price, PAYEE, default_uses, soulbound, auto_burn,
         b"".to_string(), b"".to_string(), b"".to_string(),
+        s.ctx(),
+    );
+}
+
+// Helper: freeze `gate` with the shared PlatformConfig (must already exist).
+fun freeze_gate(s: &mut ts::Scenario, cap: AdminCap, gate: &mut Gate) {
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::make_gate_immutable(cap, gate, &platform, s.ctx());
+    ts::return_shared(platform);
+}
+
+// Helper: create a gate with an explicit policy.
+fun new_gate_with_policy(
+    s: &mut ts::Scenario,
+    price: u64,
+    freeze_requires_unpaused: bool,
+    lock_commission_on_freeze: bool,
+    pause_blocks_decryption: bool,
+) {
+    access_gate::create_gate_with_policy(
+        price, PAYEE, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(),
+        access_gate::new_gate_policy(freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption),
         s.ctx(),
     );
 }
@@ -447,7 +470,7 @@ fun test_make_gate_immutable_renounces_cap_and_freezes() {
     let mut gate = s.take_shared<Gate>();
     assert!(!gate.gate_is_frozen(), 0);
 
-    access_gate::make_gate_immutable(cap, &mut gate, s.ctx()); // consumes cap
+    freeze_gate(&mut s, cap, &mut gate); // consumes cap
     assert!(gate.gate_is_frozen(), 1);
     ts::return_shared(gate);
 
@@ -475,12 +498,13 @@ fun test_setter_on_frozen_gate_aborts() {
     // gate, setters abort E_GATE_FROZEN. We freeze via a first cap, then attempt a setter
     // with a second (test-only) cap minted for the same gate.
     let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
     new_gate(&mut s, 100, 0, false, false);
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
     let cap2 = access_gate::new_admin_cap_for_testing(&gate, s.ctx());
-    access_gate::make_gate_immutable(cap, &mut gate, s.ctx());
+    freeze_gate(&mut s, cap, &mut gate);
     access_gate::set_price(&cap2, &mut gate, 1); // gate frozen -> abort E_GATE_FROZEN
     access_gate::burn_admin_cap_for_testing(cap2);
     ts::return_shared(gate);
@@ -757,12 +781,13 @@ fun test_setter_with_foreign_admin_cap_aborts() {
 #[expected_failure(abort_code = 6)] // E_GATE_FROZEN
 fun test_airdrop_on_frozen_gate_aborts() {
     let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
     new_gate(&mut s, 100, 0, false, false);
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
     let cap2 = access_gate::new_admin_cap_for_testing(&gate, s.ctx());
-    access_gate::make_gate_immutable(cap, &mut gate, s.ctx());
+    freeze_gate(&mut s, cap, &mut gate);
     access_gate::airdrop(&cap2, &gate, BUYER, s.ctx());
     access_gate::burn_admin_cap_for_testing(cap2);
     ts::return_shared(gate);
@@ -779,7 +804,7 @@ fun test_frozen_while_paused_gate_cannot_be_purchased() {
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
     access_gate::set_paused(&cap, &mut gate, true);
-    access_gate::make_gate_immutable(cap, &mut gate, s.ctx());
+    freeze_gate(&mut s, cap, &mut gate);
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -820,3 +845,109 @@ fun test_auto_burn_change_applies_to_existing_nfts() {
     assert!(!s.has_most_recent_for_sender<AccessNFT>(), 0); // deleted, not kept as receipt
     s.end();
 }
+
+// ── Gate policy (operator-selectable restrictions) ────────────────────────────────
+
+#[test]
+fun test_create_gate_uses_default_unrestricted_policy() {
+    let mut s = ts::begin(CREATOR);
+    new_gate(&mut s, 100, 0, false, false);
+    s.next_tx(CREATOR);
+    let gate = s.take_shared<Gate>();
+    assert!(!gate.gate_freeze_requires_unpaused(), 0);
+    assert!(!gate.gate_lock_commission_on_freeze(), 1);
+    assert!(!gate.gate_pause_blocks_decryption(), 2);
+    assert!(gate.gate_locked_commission_bps().is_none(), 3);
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+fun test_create_gate_with_policy_stores_policy() {
+    let mut s = ts::begin(CREATOR);
+    new_gate_with_policy(&mut s, 100, true, true, true);
+    s.next_tx(CREATOR);
+    let gate = s.take_shared<Gate>();
+    let policy = gate.gate_policy();
+    assert!(policy.policy_freeze_requires_unpaused(), 0);
+    assert!(policy.policy_lock_commission_on_freeze(), 1);
+    assert!(policy.policy_pause_blocks_decryption(), 2);
+    assert!(gate.gate_pause_blocks_decryption(), 3);
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 10)] // E_FREEZE_WHILE_PAUSED
+fun test_freeze_requires_unpaused_blocks_freezing_paused_gate() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    new_gate_with_policy(&mut s, 100, true, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    access_gate::set_paused(&cap, &mut gate, true);
+    freeze_gate(&mut s, cap, &mut gate);
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+fun test_freeze_requires_unpaused_allows_freezing_unpaused_gate() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    new_gate_with_policy(&mut s, 100, true, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    freeze_gate(&mut s, cap, &mut gate);
+    assert!(gate.gate_is_frozen(), 0);
+    ts::return_shared(gate);
+    s.end();
+}
+
+// Freezes a 1000-MIST gate at 250 bps, raises the platform rate to the 1000-bps cap, then buys.
+fun freeze_then_raise_commission_then_buy(lock: bool): u64 {
+    let mut s = ts::begin(CREATOR);
+    access_gate::share_platform_config_for_testing(TREASURY, 250, s.ctx());
+    new_gate_with_policy(&mut s, 1_000, false, lock, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    freeze_gate(&mut s, cap, &mut gate);
+    let expected_lock = if (lock) option::some(250) else option::none();
+    assert!(gate.gate_locked_commission_bps() == expected_lock, 100);
+    ts::return_shared(gate);
+
+    s.next_tx(CREATOR);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_commission_bps(&admin, &mut platform, 1000);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(1_000, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+
+    s.next_tx(TREASURY);
+    let commission = s.take_from_sender<coin::Coin<SUI>>();
+    let value = commission.value();
+    s.return_to_sender(commission);
+    s.end();
+    value
+}
+
+#[test]
+fun test_lock_commission_on_freeze_uses_snapshot() {
+    assert!(freeze_then_raise_commission_then_buy(true) == 25, 0); // 2.5% snapshot, not 10%
+}
+
+#[test]
+fun test_frozen_gate_without_lock_follows_live_commission() {
+    assert!(freeze_then_raise_commission_then_buy(false) == 100, 0); // live 10%
+}
+
