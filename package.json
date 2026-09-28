@@ -3,7 +3,7 @@
   "version": "0.0.2",
   "private": false,
   "type": "module",
-  "author": "MeddleWare <meddleware@proton.me>",
+  "author": "MeddleWare <dev@meddleware.co.uk>",
   "license": "0BSD",
   "description": "Generic NFT access-gate primitive for Sui (Move source, canonical on-chain docs, and audit). Consumed by the docs./dev. sites at build time.",
   "homepage": "https://github.com/meddleware-org/access-gate-sui#readme",
