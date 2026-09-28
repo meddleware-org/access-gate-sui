@@ -577,7 +577,7 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
 ## Open questions (`OQ#`)
 
 1. **OQ1** When will the testnet `UpgradeCap` (`0x1ab9…4e89`) be burned or moved, and when will the
-   versioning/migration policy be announced to integrators? *(2026-09-28, owner: burn vs multisig
+   versioning/migration policy be announced to integrators? *(2026-09-28, owner: design as if a multisig holds authority — for now a single key. New versions with crucial changes stay upgradeable under that authority while being tested; once ready for regular users the same authority burns the cap. No burn yet unless the cap goes stale.)* *(2026-09-28, owner: burn vs multisig
    not yet decided; recorded as an operator requirement before launch — Section D.)*
 2. **OQ2** *(first pass — decided: multisig is the target custody)* Which multisig address (and
    M-of-N) will hold platform authority, and when will `transfer-platform-authority.sh` be run?
