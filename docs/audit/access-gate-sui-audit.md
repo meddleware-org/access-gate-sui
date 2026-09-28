@@ -217,7 +217,8 @@ corrected the stale "nonce unvalidated" text (F1).
 misdescribed `set_auto_burn_at_zero`; docs./dev. sites listed only abort codes 1–5 and a
 non-existent `buy`.
 **Evidence:** commit `bfb48cd` (README, CLAUDE.md, source comments); canonical
-`docs/onchain/*` now generated into both sites (see the docs/dev repos' commits).
+`docs/onchain/*` now imported by both sites — docs `e311020` (Move tables replaced by links to the
+canonical pages), dev `19499e0` (`buy` → `purchase` with the correct argument order).
 
 ### F18 — `auto_burn_at_zero` is read at consume time
 **Severity:** Low   **Disposition:** ADJUDICATED (behaviour documented + tested; OQ9)
