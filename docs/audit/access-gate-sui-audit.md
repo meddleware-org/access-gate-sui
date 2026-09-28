@@ -159,7 +159,7 @@ uses 1–3) — clients key on `(module, code)`.
 (≈ 1.84×10¹⁶ MIST at 10%, ≈ 9.2×10¹⁷ at 0.2%).
 **Impact:** such a gate can never sell; because `commission_bps` is platform-wide and not frozen with
 a gate, raising it could newly brick a frozen gate permanently.
-**Remediation / evidence:** commit `bfb48cd` — `commission_for(price, bps)` multiplies in u128 and
+**Remediation / evidence:** commit `c835520` — `commission_for(price, bps)` multiplies in u128 and
 floors; `MAX_COMMISSION_BPS` / `BPS_DENOMINATOR` constants.
 `test_purchase_max_price_max_commission_does_not_overflow` (u64::MAX at 1000 bps) and
 `test_commission_dust_rounds_to_zero`. The deployed `0x0bedd0…` still has the u64 form (Section D).
@@ -168,7 +168,7 @@ floors; `MAX_COMMISSION_BPS` / `BPS_DENOMINATOR` constants.
 **Severity:** Low   **Disposition:** RESOLVED (source; on-chain after republish)
 **Where:** `set_platform_treasury`.
 **Impact:** every paid purchase's commission sent to `@0x0` (unrecoverable) after one mistaken call.
-**Remediation / evidence:** commit `bfb48cd` — `E_ZERO_ADDRESS = 9`;
+**Remediation / evidence:** commit `c835520` — `E_ZERO_ADDRESS = 9`;
 `test_set_platform_treasury_zero_address_aborts`, `test_set_platform_treasury_updates`. (The same
 check for a gate's `payment_recipient` is a product choice — OQ12.)
 
@@ -183,7 +183,7 @@ package (`head -n1` of *any* owned cap); (d) `Display<.*AccessNFT>` also matched
 (f) no confirmation before executing.
 **Impact:** the blocking pre-mainnet custody handoff could not run, or could transfer the wrong
 package's `UpgradeCap`.
-**Remediation / evidence:** commit `bfb48cd` — `publish.sh` records every authority object ID by
+**Remediation / evidence:** commit `c835520` — `publish.sh` records every authority object ID by
 exact type from `objectChanges`; the transfer script uses those IDs only, verifies each object's
 exact long-form type, package (`Publisher` / `UpgradeCap`) and ownership on-chain before any transfer,
 rejects unknown flags, checks the active env, and requires `YES`. Verified on localnet: dry run,
@@ -195,7 +195,7 @@ tampered-ID refusal (`Display` presented as `Publisher` → abort before sending
 **Issue:** `log` used by the ERR trap and argument check before being defined; unknown flags
 silently ignored (a typo such as `--make-imutable` would publish without burning); network not
 validated; localnet `UpgradeCap` picked by position among five sender-owned objects.
-**Remediation / evidence:** commit `bfb48cd`; exercised on localnet (`--create-gate`) and with bad
+**Remediation / evidence:** commit `c835520`; exercised on localnet (`--create-gate`) and with bad
 arguments.
 
 ### F14 — Package address drift
@@ -211,7 +211,7 @@ the live `Gate` `0x0485…`, two `SoulboundAccessNFT`s, an `AdminCap`, `Platform
 `PlatformAdminCap`, and is the `access_gate` linked by `seal_policies 0x9f0563…`. `0x692547…`
 (published 2026-09-20 23:45, UpgradeCap `0x6b6cd7d451151e53716cf7b781133c2eb9b90aa35c8a84b00fde2881e487b9a2`,
 held by the publisher EOA) has only its `init` objects — no gate or pass has ever been created on it.
-**Remediation / evidence:** commit `8f38cfb` removes `published-at` from `Move.toml` (with a comment
+**Remediation / evidence:** commit `22fe6d7` removes `published-at` from `Move.toml` (with a comment
 naming the canonical and stray IDs); the next publish records itself in `Published.toml`. The stray
 package is harmless but its `UpgradeCap` is live — burning it is OQ13.
 
@@ -223,7 +223,7 @@ to `f191c2d`; local tags `v0.0.2` / `v0.0.3` are older than `v0.0.1` and absent 
 
 ### F16 — `SECURITY.md` claimed the UpgradeCap is burned on publish
 **Severity:** Low   **Disposition:** RESOLVED (statement corrected; underlying custody → F3)
-**Evidence:** commit `bfb48cd` — states the live testnet cap and the pre-mainnet gate; also
+**Evidence:** commit `c835520` — states the live testnet cap and the pre-mainnet gate; also
 corrected the stale "nonce unvalidated" text (F1).
 
 ### F17 — Documentation drift
@@ -232,9 +232,9 @@ corrected the stale "nonce unvalidated" text (F1).
 16 tests, a moved tag and an out-of-repo link; source doc comments mentioned `mint_to` and
 misdescribed `set_auto_burn_at_zero`; docs./dev. sites listed only abort codes 1–5 and a
 non-existent `buy`.
-**Evidence:** commit `bfb48cd` (README, CLAUDE.md, source comments); canonical
-`docs/onchain/*` now imported by both sites — docs `e311020` (Move tables replaced by links to the
-canonical pages), dev `19499e0` (`buy` → `purchase` with the correct argument order).
+**Evidence:** commit `c835520` (README, CLAUDE.md, source comments); canonical
+`docs/onchain/*` now imported by both sites — docs `193ef22` (Move tables replaced by links to the
+canonical pages), dev `4492c3c` (`buy` → `purchase` with the correct argument order).
 
 ### F18 — `auto_burn_at_zero` is read at consume time
 **Severity:** Low   **Disposition:** ADJUDICATED (behaviour documented + tested; OQ9)
@@ -252,7 +252,7 @@ with `freeze_requires_unpaused` refuses the freeze while paused (`E_FREEZE_WHILE
 indexable; current state is readable from the objects.
 
 ### F21 — Licence inconsistency
-**Severity:** Info   **Disposition:** RESOLVED (OQ10 answered: 0BSD) — commit `8f38cfb` changes the
+**Severity:** Info   **Disposition:** RESOLVED (OQ10 answered: 0BSD) — commit `22fe6d7` changes the
 source and test SPDX headers from CC0-1.0 to 0BSD, matching `LICENSE`, `Move.toml` and `package.json`.
 
 ### F22 — `init` defaults verified
@@ -274,7 +274,7 @@ imported, no dead links, lint/type-check green).
 (no placeholder) → release the site images.
 
 ### F24 — Gate policies: freeze-while-paused, commission lock, pause blocks decryption
-**Severity:** Info (design)   **Disposition:** RESOLVED (commit `8f38cfb`; on-chain after a fresh publish)
+**Severity:** Info (design)   **Disposition:** RESOLVED (commit `22fe6d7`; on-chain after a fresh publish)
 **Where:** `GatePolicy { freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption }`
 stored on `Gate` with `locked_commission_bps: Option<u64>`; `create_gate_with_policy`,
 `new_gate_policy`, `default_gate_policy`; `make_gate_immutable(cap, gate, platform, ctx)`;
@@ -288,8 +288,8 @@ enforced by `seal_policies::nft_gate` (`E_GATE_PAUSED = 4`), not here.
 **Evidence:** tests `test_create_gate_uses_default_unrestricted_policy`, `test_create_gate_with_policy_stores_policy`,
 `test_freeze_requires_unpaused_blocks_freezing_paused_gate`,
 `test_freeze_requires_unpaused_allows_freezing_unpaused_gate`, `test_lock_commission_on_freeze_uses_snapshot`,
-`test_frozen_gate_without_lock_follows_live_commission` (42/42). Client: `nft-gate-client` `b537667`;
-tool config: `access-gate-ui` `e746071` (`VITE_GATE_*`, all default `false`).
+`test_frozen_gate_without_lock_follows_live_commission` (42/42). Client: `nft-gate-client` `80f652e`;
+tool config: `access-gate-ui` `e91781a` (`VITE_GATE_*`, all default `false`).
 **Impact on release:** the `Gate` struct layout and the public `make_gate_immutable` signature
 changed, which a compatible upgrade forbids — the release is a **new package**; gates of `0x0bedd0…`
 (including the live paywall gate) stay on the old version.
@@ -301,8 +301,8 @@ changed, which a compatible upgrade forbids — the release is a **new package**
 **Decision (owner):** the minimum is operator-configurable; Meddleware's deployment uses the minimum
 profitable amount.
 **Remediation / evidence:** `nft-gate-client` `minimumProfitablePriceMist` / `fetchPlatformCommission`
-(`b537667`, `fa527be`); `access-gate-ui` `VITE_GATE_MIN_PRICE_MIST` (`auto` = the live-commission
-floor, default; an integer = fixed floor; `0` = none) and `VITE_GATE_ALLOW_FREE` (`e746071`). The
+(`80f652e`, `4f60283`); `access-gate-ui` `VITE_GATE_MIN_PRICE_MIST` (`auto` = the live-commission
+floor, default; an integer = fixed floor; `0` = none) and `VITE_GATE_ALLOW_FREE` (`e91781a`). The
 contract does not enforce a floor: direct callers can still create dust-priced gates (Risks). Any
 commission of ≥ 1 MIST is net-positive for the treasury (receiving a coin costs the recipient nothing,
 and its storage deposit is paid by the buyer), so ≥ 1 MIST is the profitability threshold.
@@ -554,11 +554,11 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
 
 - 2026-09-18 — first-pass baseline (18 → 22 tests; F1–F9; OQ1–OQ6).
 - 2026-09-28 — relocated to the package repo; re-verified under the updated template + Sui lens.
-  Added F10–F22; F10–F13, F16, F17 RESOLVED in `bfb48cd` (36/36 tests; scripts verified on localnet);
+  Added F10–F22; F10–F13, F16, F17 RESOLVED in `c835520` (36/36 tests; scripts verified on localnet);
   on-chain reads confirmed `0x0bedd0…` canonical for consumers, `0x692547…` also exists, testnet
   `UpgradeCap` live (compatible policy). Package made npm-consumable for the docs sites.
 - 2026-09-28 (second pass) — owner answers to OQ1/2/4/5/7/10/11 recorded. F24 (gate policies) and
-  F21 (0BSD) RESOLVED in `8f38cfb`; F14 RESOLVED (on-chain GraphQL reads: `0x0bedd0…` canonical,
+  F21 (0BSD) RESOLVED in `22fe6d7`; F14 RESOLVED (on-chain GraphQL reads: `0x0bedd0…` canonical,
   `0x692547…` holds only init objects, its UpgradeCap `0x6b6cd7…` live); F4/F19 RESOLVED via
-  policy; F25 (dust pricing) RESOLVED at the tool layer (`nft-gate-client` `b537667`/`fa527be`,
-  `access-gate-ui` `e746071`). 42/42 tests. OQ13–OQ15 added.
+  policy; F25 (dust pricing) RESOLVED at the tool layer (`nft-gate-client` `80f652e`/`4f60283`,
+  `access-gate-ui` `e91781a`). 42/42 tests. OQ13–OQ15 added.
