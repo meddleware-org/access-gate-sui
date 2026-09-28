@@ -16,19 +16,57 @@ const BUYER: address = @0xB0B;
 const PAYEE: address = @0xFEE;
 const TREASURY: address = @0x7EA;
 
-// Helper: create a gate in the current tx with empty display metadata.
-fun new_gate(
+// Helper: share a PlatformConfig with explicit terms and move to the next tx (so it can be taken).
+fun setup_platform_with(
+    s: &mut ts::Scenario,
+    treasury: address,
+    commission_bps: u64,
+    min_commission_mist: u64,
+    free_gate_fee_mist: u64,
+) {
+    access_gate::share_platform_config_full_for_testing(
+        treasury, commission_bps, min_commission_mist, free_gate_fee_mist, s.ctx(),
+    );
+    let sender = s.sender();
+    s.next_tx(sender);
+}
+
+// Helper: a zero-commission, zero-fee PlatformConfig (exact payment amounts in tests).
+fun setup_platform(s: &mut ts::Scenario) {
+    let sender = s.sender();
+    setup_platform_with(s, sender, 0, 0, 0);
+}
+
+// Helper: create a gate with explicit policy flags (sets up a zero-fee platform if none exists).
+// Price 0 goes through `create_free_gate`, paying the platform's free-gate fee exactly.
+fun new_gate_full(
     s: &mut ts::Scenario,
     price: u64,
     default_uses: u64,
     soulbound: bool,
     auto_burn: bool,
+    policy: access_gate::GatePolicy,
 ) {
-    access_gate::create_gate(
-        price, PAYEE, default_uses, soulbound, auto_burn,
-        b"".to_string(), b"".to_string(), b"".to_string(),
-        s.ctx(),
-    );
+    if (!ts::has_most_recent_shared<PlatformConfig>()) setup_platform(s);
+    let platform = s.take_shared<PlatformConfig>();
+    if (price == 0) {
+        let fee = coin::mint_for_testing<SUI>(platform.platform_free_gate_fee_mist(), s.ctx());
+        access_gate::create_free_gate(
+            &platform, fee, PAYEE, default_uses, soulbound, auto_burn,
+            b"".to_string(), b"".to_string(), b"".to_string(), policy, s.ctx(),
+        );
+    } else {
+        access_gate::create_gate(
+            &platform, price, PAYEE, default_uses, soulbound, auto_burn,
+            b"".to_string(), b"".to_string(), b"".to_string(), policy, s.ctx(),
+        );
+    };
+    ts::return_shared(platform);
+}
+
+// Helper: create a gate with the unrestricted default policy.
+fun new_gate(s: &mut ts::Scenario, price: u64, default_uses: u64, soulbound: bool, auto_burn: bool) {
+    new_gate_full(s, price, default_uses, soulbound, auto_burn, access_gate::default_gate_policy());
 }
 
 // Helper: freeze `gate` with the shared PlatformConfig (must already exist).
@@ -38,7 +76,7 @@ fun freeze_gate(s: &mut ts::Scenario, cap: AdminCap, gate: &mut Gate) {
     ts::return_shared(platform);
 }
 
-// Helper: create a gate with an explicit policy.
+// Helper: create a paid, unlimited gate with explicit policy flags.
 fun new_gate_with_policy(
     s: &mut ts::Scenario,
     price: u64,
@@ -46,18 +84,26 @@ fun new_gate_with_policy(
     lock_commission_on_freeze: bool,
     pause_blocks_decryption: bool,
 ) {
-    access_gate::create_gate_with_policy(
-        price, PAYEE, 0, false, false,
-        b"".to_string(), b"".to_string(), b"".to_string(),
-        access_gate::new_gate_policy(freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption),
-        s.ctx(),
+    new_gate_full(
+        s, price, 0, false, false,
+        access_gate::new_gate_policy(freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption, false),
     );
 }
 
-// Helper: create and share a zero-commission PlatformConfig in the current tx.
-// Take it with `s.take_shared<PlatformConfig>()` after the next `s.next_tx(...)`.
-fun setup_platform(s: &mut ts::Scenario) {
-    access_gate::share_platform_config_zero_commission_for_testing(s.ctx());
+// Helper: set a price with the shared PlatformConfig.
+fun set_price(s: &mut ts::Scenario, cap: &AdminCap, gate: &mut Gate, price: u64) {
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_price(cap, gate, &platform, price);
+    ts::return_shared(platform);
+}
+
+// Helper: airdrop, paying exactly the commission due (from a minted coin).
+fun airdrop(s: &mut ts::Scenario, cap: &AdminCap, gate: &Gate, recipient: address) {
+    let platform = s.take_shared<PlatformConfig>();
+    let due = access_gate::gate_commission_mist(gate, &platform);
+    let payment = coin::mint_for_testing<SUI>(due, s.ctx());
+    access_gate::airdrop(cap, gate, &platform, payment, recipient, s.ctx());
+    ts::return_shared(platform);
 }
 
 #[test]
@@ -405,7 +451,7 @@ fun test_airdrop_grants_without_payment() {
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let gate = s.take_shared<Gate>();
-    access_gate::airdrop(&cap, &gate, BUYER, s.ctx());
+    airdrop(&mut s, &cap, &gate, BUYER);
     s.return_to_sender(cap);
     ts::return_shared(gate);
 
@@ -422,7 +468,7 @@ fun test_admin_setters() {
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
 
-    access_gate::set_price(&cap, &mut gate, 250);
+    set_price(&mut s, &cap, &mut gate, 250);
     access_gate::set_default_uses(&cap, &mut gate, 5);
     access_gate::set_soulbound(&cap, &mut gate, true);
     access_gate::set_auto_burn_at_zero(&cap, &mut gate, true);
@@ -504,9 +550,11 @@ fun test_setter_on_frozen_gate_aborts() {
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
     let cap2 = access_gate::new_admin_cap_for_testing(&gate, s.ctx());
-    freeze_gate(&mut s, cap, &mut gate);
-    access_gate::set_price(&cap2, &mut gate, 1); // gate frozen -> abort E_GATE_FROZEN
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::make_gate_immutable(cap, &mut gate, &platform, s.ctx());
+    access_gate::set_price(&cap2, &mut gate, &platform, 1); // gate frozen -> abort E_GATE_FROZEN
     access_gate::burn_admin_cap_for_testing(cap2);
+    ts::return_shared(platform);
     ts::return_shared(gate);
     s.end();
 }
@@ -517,7 +565,7 @@ fun test_setter_on_frozen_gate_aborts() {
 fun test_purchase_nonzero_commission_splits_payment() {
     let mut s = ts::begin(CREATOR);
     // 2.5% commission to TREASURY; gate price 1000 → commission 25, operator share 975.
-    access_gate::share_platform_config_for_testing(TREASURY, 250, s.ctx());
+    setup_platform_with(&mut s, TREASURY, 250, 0, 0);
     new_gate(&mut s, 1_000, 0, false, false);
     s.next_tx(BUYER);
 
@@ -547,7 +595,7 @@ fun test_purchase_nonzero_commission_splits_payment() {
 #[test]
 fun test_set_commission_at_cap_succeeds() {
     let mut s = ts::begin(CREATOR);
-    access_gate::share_platform_config_for_testing(TREASURY, 0, s.ctx());
+    setup_platform_with(&mut s, TREASURY, 0, 0, 0);
     let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
     s.next_tx(CREATOR);
 
@@ -563,7 +611,7 @@ fun test_set_commission_at_cap_succeeds() {
 #[expected_failure(abort_code = 7)] // E_COMMISSION_TOO_HIGH
 fun test_set_commission_above_cap_aborts() {
     let mut s = ts::begin(CREATOR);
-    access_gate::share_platform_config_for_testing(TREASURY, 0, s.ctx());
+    setup_platform_with(&mut s, TREASURY, 0, 0, 0);
     let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
     s.next_tx(CREATOR);
 
@@ -580,7 +628,7 @@ fun test_set_commission_above_cap_aborts() {
 fun test_purchase_max_price_max_commission_does_not_overflow() {
     let max = 18_446_744_073_709_551_615; // u64::MAX
     let mut s = ts::begin(CREATOR);
-    access_gate::share_platform_config_for_testing(TREASURY, 1000, s.ctx()); // 10% cap
+    setup_platform_with(&mut s, TREASURY, 1000, 0, 0); // 10% cap
     new_gate(&mut s, max, 0, false, false);
     s.next_tx(BUYER);
 
@@ -606,7 +654,7 @@ fun test_purchase_max_price_max_commission_does_not_overflow() {
 fun test_commission_dust_rounds_to_zero() {
     // 20 bps on a 499 MIST price: floor(499 * 20 / 10000) = 0 → operator receives everything.
     let mut s = ts::begin(CREATOR);
-    access_gate::share_platform_config_for_testing(TREASURY, 20, s.ctx());
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
     new_gate(&mut s, 499, 0, false, false);
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
@@ -629,7 +677,7 @@ fun test_commission_dust_rounds_to_zero() {
 #[test]
 fun test_set_platform_treasury_updates() {
     let mut s = ts::begin(CREATOR);
-    access_gate::share_platform_config_for_testing(TREASURY, 20, s.ctx());
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
     let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
     s.next_tx(CREATOR);
     let mut platform = s.take_shared<PlatformConfig>();
@@ -644,7 +692,7 @@ fun test_set_platform_treasury_updates() {
 #[expected_failure(abort_code = 9)] // E_ZERO_ADDRESS
 fun test_set_platform_treasury_zero_address_aborts() {
     let mut s = ts::begin(CREATOR);
-    access_gate::share_platform_config_for_testing(TREASURY, 20, s.ctx());
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
     let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
     s.next_tx(CREATOR);
     let mut platform = s.take_shared<PlatformConfig>();
@@ -665,6 +713,9 @@ fun test_init_creates_platform_objects() {
     let platform = s.take_shared<PlatformConfig>();
     assert!(platform.platform_commission_bps() == 20, 0);
     assert!(platform.platform_treasury() == CREATOR, 1);
+    assert!(platform.platform_min_commission_mist() == 1_000_000, 7);
+    assert!(platform.platform_free_gate_fee_mist() == 100_000_000, 8);
+    assert!(access_gate::min_paid_price_mist(&platform) == 10_000_000, 9);
     ts::return_shared(platform);
 
     assert!(s.has_most_recent_for_sender<PlatformAdminCap>(), 2);
@@ -771,7 +822,7 @@ fun test_setter_with_foreign_admin_cap_aborts() {
     new_gate(&mut s, 100, 0, false, false); // gate B
     s.next_tx(CREATOR);
     let mut gate_b = s.take_shared<Gate>();
-    access_gate::set_price(&cap_a, &mut gate_b, 1); // cap A on gate B
+    set_price(&mut s, &cap_a, &mut gate_b, 1); // cap A on gate B
     ts::return_shared(gate_b);
     s.return_to_sender(cap_a);
     s.end();
@@ -787,9 +838,12 @@ fun test_airdrop_on_frozen_gate_aborts() {
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
     let cap2 = access_gate::new_admin_cap_for_testing(&gate, s.ctx());
-    freeze_gate(&mut s, cap, &mut gate);
-    access_gate::airdrop(&cap2, &gate, BUYER, s.ctx());
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::make_gate_immutable(cap, &mut gate, &platform, s.ctx());
+    let payment = coin::mint_for_testing<SUI>(0, s.ctx());
+    access_gate::airdrop(&cap2, &gate, &platform, payment, BUYER, s.ctx()); // frozen -> E_GATE_FROZEN
     access_gate::burn_admin_cap_for_testing(cap2);
+    ts::return_shared(platform);
     ts::return_shared(gate);
     s.end();
 }
@@ -857,7 +911,8 @@ fun test_create_gate_uses_default_unrestricted_policy() {
     assert!(!gate.gate_freeze_requires_unpaused(), 0);
     assert!(!gate.gate_lock_commission_on_freeze(), 1);
     assert!(!gate.gate_pause_blocks_decryption(), 2);
-    assert!(gate.gate_locked_commission_bps().is_none(), 3);
+    assert!(gate.gate_locked_commission().is_none(), 3);
+    assert!(!gate.gate_pause_blocks_access(), 4);
     ts::return_shared(gate);
     s.end();
 }
@@ -909,14 +964,15 @@ fun test_freeze_requires_unpaused_allows_freezing_unpaused_gate() {
 // Freezes a 1000-MIST gate at 250 bps, raises the platform rate to the 1000-bps cap, then buys.
 fun freeze_then_raise_commission_then_buy(lock: bool): u64 {
     let mut s = ts::begin(CREATOR);
-    access_gate::share_platform_config_for_testing(TREASURY, 250, s.ctx());
+    setup_platform_with(&mut s, TREASURY, 250, 0, 0);
     new_gate_with_policy(&mut s, 1_000, false, lock, false);
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
     freeze_gate(&mut s, cap, &mut gate);
-    let expected_lock = if (lock) option::some(250) else option::none();
-    assert!(gate.gate_locked_commission_bps() == expected_lock, 100);
+    let locked = gate.gate_locked_commission();
+    assert!(locked.is_some() == lock, 100);
+    if (lock) assert!(locked.borrow().terms_bps() == 250, 101);
     ts::return_shared(gate);
 
     s.next_tx(CREATOR);
@@ -951,3 +1007,332 @@ fun test_frozen_gate_without_lock_follows_live_commission() {
     assert!(freeze_then_raise_commission_then_buy(false) == 100, 0); // live 10%
 }
 
+// ── Commission floor, minimum price and the 10% cap ───────────────────────────────
+
+// Buys one pass from the most recent gate paying `price`, returns what the treasury received.
+fun buy_and_read_treasury(s: &mut ts::Scenario, price: u64): u64 {
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(price, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.next_tx(TREASURY);
+    if (!s.has_most_recent_for_sender<coin::Coin<SUI>>()) return 0;
+    let c = s.take_from_sender<coin::Coin<SUI>>();
+    let v = c.value();
+    s.return_to_sender(c);
+    v
+}
+
+#[test]
+fun test_min_commission_applies_to_cheap_purchases() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate(&mut s, 10_000_000, 0, false, false); // 0.2% would be 20_000 < floor
+    assert!(buy_and_read_treasury(&mut s, 10_000_000) == 1_000_000, 0);
+    s.next_tx(PAYEE);
+    let paid = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(paid.value() == 9_000_000, 1);
+    s.return_to_sender(paid);
+    s.end();
+}
+
+#[test]
+fun test_percentage_applies_above_the_floor() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate(&mut s, 1_000_000_000_000, 0, false, false); // 1000 SUI → 0.2% = 2 SUI
+    assert!(buy_and_read_treasury(&mut s, 1_000_000_000_000) == 2_000_000_000, 0);
+    s.end();
+}
+
+#[test]
+fun test_commission_capped_at_ten_percent_after_floor_raise() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate(&mut s, 10_000_000, 0, false, false);
+    s.next_tx(CREATOR);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_min_commission_mist(&admin, &mut platform, 5_000_000); // floor now > 10% of price
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+    assert!(buy_and_read_treasury(&mut s, 10_000_000) == 1_000_000, 0); // capped at 10%
+    s.end();
+}
+
+#[test]
+fun test_min_paid_price_is_ten_times_the_floor() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    assert!(access_gate::min_paid_price_mist(&platform) == 1, 0);
+    access_gate::set_min_commission_mist(&admin, &mut platform, 1);
+    assert!(access_gate::min_paid_price_mist(&platform) == 10, 1);
+    access_gate::set_min_commission_mist(&admin, &mut platform, 1_000_000);
+    assert!(access_gate::min_paid_price_mist(&platform) == 10_000_000, 2);
+    access_gate::set_min_commission_mist(&admin, &mut platform, 18_446_744_073_709_551_615);
+    assert!(access_gate::min_paid_price_mist(&platform) == 18_446_744_073_709_551_615, 3); // saturates
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+    s.end();
+}
+
+#[test]
+fun test_commission_for_price_formula() {
+    let t = access_gate::commission_terms_for_testing(20, 1_000_000);
+    assert!(access_gate::commission_for_price(0, &t) == 0, 0);
+    assert!(access_gate::commission_for_price(10_000_000, &t) == 1_000_000, 1);
+    assert!(access_gate::commission_for_price(5_000_000, &t) == 500_000, 2); // capped at 10%
+    assert!(access_gate::commission_for_price(1_000_000_000, &t) == 2_000_000, 3); // 0.2%
+}
+
+#[test]
+#[expected_failure(abort_code = 11)] // E_PRICE_TOO_LOW
+fun test_create_gate_below_min_price_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate(&mut s, 9_999_999, 0, false, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 11)] // E_PRICE_TOO_LOW — free gates go through create_free_gate
+fun test_create_gate_zero_price_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::create_gate(
+        &platform, 0, PAYEE, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(), access_gate::default_gate_policy(), s.ctx(),
+    );
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 11)] // E_PRICE_TOO_LOW
+fun test_set_price_below_min_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate(&mut s, 10_000_000, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    set_price(&mut s, &cap, &mut gate, 9_999_999);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+
+// ── Free gates ──────────────────────────────────────────────────────────────────
+
+#[test]
+fun test_create_free_gate_pays_fee_and_refunds_excess() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 100);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::create_free_gate(
+        &platform, coin::mint_for_testing<SUI>(150, s.ctx()), PAYEE, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(), access_gate::default_gate_policy(), s.ctx(),
+    );
+    ts::return_shared(platform);
+    s.next_tx(CREATOR);
+    let gate = s.take_shared<Gate>();
+    assert!(gate.gate_price_mist() == 0, 0);
+    assert!(gate.gate_free_fee_paid(), 1);
+    ts::return_shared(gate);
+    let refund = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(refund.value() == 50, 2);
+    s.return_to_sender(refund);
+    s.next_tx(TREASURY);
+    let fee = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(fee.value() == 100, 3);
+    s.return_to_sender(fee);
+    // Buying from a free gate pays nothing.
+    assert!(buy_and_read_treasury(&mut s, 0) == 100, 4); // still only the fee coin
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 2)] // E_INSUFFICIENT_PAYMENT
+fun test_create_free_gate_underpaid_fee_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 100);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::create_free_gate(
+        &platform, coin::mint_for_testing<SUI>(99, s.ctx()), PAYEE, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(), access_gate::default_gate_policy(), s.ctx(),
+    );
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 12)] // E_FREE_FEE_UNPAID
+fun test_set_price_zero_without_fee_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 100);
+    new_gate(&mut s, 1_000, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    set_price(&mut s, &cap, &mut gate, 0);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+fun test_make_gate_free_charges_once_then_price_can_toggle() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 100);
+    new_gate(&mut s, 1_000, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::make_gate_free(&cap, &mut gate, &platform, coin::mint_for_testing<SUI>(100, s.ctx()), s.ctx());
+    assert!(gate.gate_price_mist() == 0 && gate.gate_free_fee_paid(), 0);
+    access_gate::set_price(&cap, &mut gate, &platform, 2_000); // back to paid
+    access_gate::set_price(&cap, &mut gate, &platform, 0);     // free again: fee already paid
+    // A second make_gate_free charges nothing and refunds the coin.
+    access_gate::make_gate_free(&cap, &mut gate, &platform, coin::mint_for_testing<SUI>(7, s.ctx()), s.ctx());
+    ts::return_shared(platform);
+    ts::return_shared(gate);
+    s.return_to_sender(cap);
+    s.next_tx(CREATOR);
+    let refund = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(refund.value() == 7, 1);
+    s.return_to_sender(refund);
+    s.next_tx(TREASURY);
+    let fee = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(fee.value() == 100, 2);
+    s.return_to_sender(fee);
+    s.end();
+}
+
+// ── Airdrop commission ───────────────────────────────────────────────────────────
+
+#[test]
+fun test_airdrop_pays_commission_on_paid_gate() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate(&mut s, 10_000_000, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let gate = s.take_shared<Gate>();
+    airdrop(&mut s, &cap, &gate, BUYER); // pays exactly gate_commission_mist = 1_000_000
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.next_tx(TREASURY);
+    let c = s.take_from_sender<coin::Coin<SUI>>();
+    assert!(c.value() == 1_000_000, 0);
+    s.return_to_sender(c);
+    s.next_tx(BUYER);
+    assert!(s.has_most_recent_for_sender<AccessNFT>(), 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 2)] // E_INSUFFICIENT_PAYMENT
+fun test_airdrop_underpaid_commission_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate(&mut s, 10_000_000, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::airdrop(&cap, &gate, &platform, coin::mint_for_testing<SUI>(999_999, s.ctx()), BUYER, s.ctx());
+    ts::return_shared(platform);
+    ts::return_shared(gate);
+    s.return_to_sender(cap);
+    s.end();
+}
+
+// ── pause_blocks_access ───────────────────────────────────────────────────────────
+
+// Mints a 2-use pass from a gate with `pause_blocks_access = block`, pauses the gate, then consumes.
+fun consume_while_paused(block: bool) {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    new_gate_full(&mut s, 0, 2, false, false, access_gate::new_gate_policy(false, false, false, block));
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(0, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    access_gate::set_paused(&cap, &mut gate, true);
+    assert!(gate.gate_pause_blocks_access() == block, 0);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let nft = s.take_from_sender<AccessNFT>();
+    access_gate::consume(nft, &gate, b"00000001", s.ctx());
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1)] // E_PAUSED
+fun test_pause_blocks_access_stops_consume() {
+    consume_while_paused(true);
+}
+
+#[test]
+fun test_pause_without_access_policy_allows_consume() {
+    consume_while_paused(false);
+}
+
+// ── Locked terms include the floor ────────────────────────────────────────────────
+
+fun freeze_then_raise_floor_then_buy(lock: bool): u64 {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 1_000_000, 0);
+    new_gate_full(&mut s, 100_000_000, 0, false, false, access_gate::new_gate_policy(false, lock, false, false));
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    freeze_gate(&mut s, cap, &mut gate);
+    ts::return_shared(gate);
+    s.next_tx(CREATOR);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_min_commission_mist(&admin, &mut platform, 5_000_000);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+    let v = buy_and_read_treasury(&mut s, 100_000_000);
+    s.end();
+    v
+}
+
+#[test]
+fun test_locked_terms_keep_the_floor() {
+    assert!(freeze_then_raise_floor_then_buy(true) == 1_000_000, 0);
+    assert!(freeze_then_raise_floor_then_buy(false) == 5_000_000, 1);
+}
+
+// ── Platform fee setters ──────────────────────────────────────────────────────────
+
+#[test]
+fun test_platform_fee_setters_update() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_min_commission_mist(&admin, &mut platform, 42);
+    access_gate::set_free_gate_fee_mist(&admin, &mut platform, 7);
+    assert!(platform.platform_min_commission_mist() == 42, 0);
+    assert!(platform.platform_free_gate_fee_mist() == 7, 1);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+    s.end();
+}

@@ -55,23 +55,29 @@
 /// ## Gate policy (operator-selectable restrictions)
 ///
 /// Each gate carries an immutable `GatePolicy`, fixed at creation by whatever tool creates it (the
-/// tool's operator decides which restrictions to apply). Every restriction is OFF by default
-/// (`create_gate` / `default_gate_policy`), so the permissive behaviour is unchanged unless a gate
-/// opts in via `create_gate_with_policy`:
+/// tool's operator decides which restrictions to apply). Every restriction is OFF in
+/// `default_gate_policy`:
 /// - `freeze_requires_unpaused` — `make_gate_immutable` aborts while the gate is paused, so a gate
 ///   can never be frozen into a permanently unsellable state.
-/// - `lock_commission_on_freeze` — freezing snapshots the platform `commission_bps`; purchases on the
-///   frozen gate use that snapshot, so later platform commission changes cannot affect it.
-/// - `pause_blocks_decryption` — a hint for access consumers: dependent policies (e.g. the Seal
-///   `nft_gate` policy) deny access while the gate is paused. This module stores and exposes it; it
-///   does not change `purchase`/`consume`.
+/// - `lock_commission_on_freeze` — freezing snapshots the platform commission terms; purchases and
+///   airdrops on the frozen gate use that snapshot, so later platform changes cannot affect it.
+/// - `pause_blocks_decryption` — dependent decryption policies (the Seal `nft_gate` policy) deny
+///   access while the gate is paused. Stored and exposed here; enforced by the dependant.
+/// - `pause_blocks_access` — while paused, `consume` aborts (`E_PAUSED`) and access gateways deny
+///   holders; independent of `pause_blocks_decryption`.
 ///
-/// ## Platform commission
+/// ## Platform commission and fees
 ///
-/// A `PlatformConfig` shared object (created in `init`) carries a `treasury` address and
-/// `commission_bps` (basis points). Every paid `purchase` splits the payment: the
-/// commission fraction goes to `treasury`, the remainder to the gate's `payment_recipient`.
-/// This is automatic and on-chain; the platform operator incurs no gas cost.
+/// A `PlatformConfig` shared object (created in `init`) carries the platform `treasury` and its terms,
+/// all set by the `PlatformAdminCap` holder:
+/// - `commission_bps` + `min_commission_mist` — every paid `purchase` (and every `airdrop` from a paid
+///   gate) pays `max(price × commission_bps / 10000, min_commission_mist)` to the treasury, never more
+///   than `MAX_COMMISSION_BPS` (10%) of the price; the rest goes to the gate's `payment_recipient`.
+///   A paid gate's price must therefore be at least `min_paid_price_mist` (10 × the minimum
+///   commission), so the floor always fits under the cap.
+/// - `free_gate_fee_mist` — a one-off fee to make a gate free: paid by `create_free_gate`, or by
+///   `make_gate_free` before a paid gate's price can be set to 0. Once paid, the gate may move between
+///   free and paid; paid purchases always carry the commission.
 ///
 /// ## NFT display metadata
 ///
@@ -82,8 +88,9 @@
 ///
 /// ## Trust assumptions
 ///
-/// - `create_gate`, `purchase`, and `consume` are permissionless. Anyone may stand up a
-///   gate; anyone may buy access if they pay the price; only the NFT owner can consume it.
+/// - `create_gate`, `create_free_gate`, `purchase`, and `consume` are permissionless. Anyone may
+///   stand up a gate (paying the free-gate fee for a free one); anyone may buy access if they pay
+///   the price; only the NFT owner can consume it.
 /// - Privileged operations (price/recipient/pause/flags, free grants) require the
 ///   `AdminCap` minted to the gate creator and bound to that gate's ID — unless the gate
 ///   has been made immutable (`frozen`), after which no privileged operation is possible.
@@ -126,6 +133,10 @@ const E_INVALID_NONCE: u64 = 8;
 const E_ZERO_ADDRESS: u64 = 9;
 /// `make_gate_immutable` on a paused gate whose policy has `freeze_requires_unpaused`.
 const E_FREEZE_WHILE_PAUSED: u64 = 10;
+/// A paid price below `min_paid_price_mist` (or 0 via `create_gate`; use `create_free_gate`).
+const E_PRICE_TOO_LOW: u64 = 11;
+/// `set_price(0)` on a gate whose free-gate fee has not been paid (use `make_gate_free`).
+const E_FREE_FEE_UNPAID: u64 = 12;
 
 /// Minimum nonce length (bytes). Enforced by `consume_data`; ensures the server-issued
 /// challenge carries enough entropy to be meaningful as a replay guard.
@@ -142,12 +153,27 @@ public struct PlatformConfig has key {
     /// Commission in basis points (20 = 0.2%). Applied to every paid `purchase`.
     /// Hard cap: 1000 bps (10%) — enforced by `set_commission_bps`.
     commission_bps: u64,
+    /// Floor on a paid purchase's commission (MIST); the commission never exceeds 10% of the price.
+    min_commission_mist: u64,
+    /// One-off fee (MIST) to make a gate free (`create_free_gate` / `make_gate_free`).
+    free_gate_fee_mist: u64,
+}
+
+/// A commission rule: `max(price × bps / 10000, min_mist)`, capped at 10% of the price.
+public struct CommissionTerms has copy, drop, store {
+    bps: u64,
+    min_mist: u64,
 }
 
 /// Maximum `commission_bps` (10%). `set_commission_bps` aborts above it.
 const MAX_COMMISSION_BPS: u64 = 1000;
 /// Basis-point denominator.
 const BPS_DENOMINATOR: u64 = 10000;
+/// `init` defaults: 0.2% commission, never less than 0.001 SUI per paid mint (so the minimum paid
+/// price is 0.01 SUI); 0.1 SUI to make a gate free.
+const DEFAULT_COMMISSION_BPS: u64 = 20;
+const DEFAULT_MIN_COMMISSION_MIST: u64 = 1_000_000;
+const DEFAULT_FREE_GATE_FEE_MIST: u64 = 100_000_000;
 
 /// Capability authorising updates to `PlatformConfig`.
 /// Transferred to the package publisher in `init`.
@@ -162,6 +188,7 @@ public struct GatePolicy has copy, drop, store {
     freeze_requires_unpaused: bool,
     lock_commission_on_freeze: bool,
     pause_blocks_decryption: bool,
+    pause_blocks_access: bool,
 }
 
 /// Access flavour carried by every access NFT.
@@ -233,9 +260,12 @@ public struct Gate has key {
     nft_description: String,
     /// Operator-selected restrictions; immutable after creation.
     policy: GatePolicy,
-    /// Commission snapshot taken at freeze when `policy.lock_commission_on_freeze`; purchases on a
-    /// frozen gate use it instead of the live `PlatformConfig.commission_bps`.
-    locked_commission_bps: Option<u64>,
+    /// Commission terms snapshotted at freeze when `policy.lock_commission_on_freeze`; purchases and
+    /// airdrops on a frozen gate use them instead of the live `PlatformConfig` terms.
+    locked_commission: Option<CommissionTerms>,
+    /// True once the free-gate fee has been paid (by `create_free_gate` or `make_gate_free`); only
+    /// then may the price be 0.
+    free_fee_paid: bool,
 }
 
 /// Capability authorising privileged operations on exactly one `Gate`.
@@ -256,6 +286,8 @@ public struct GateCreatedEvent has copy, drop {
     auto_burn_at_zero: bool,
     nft_name: String,
     policy: GatePolicy,
+    /// Free-gate fee paid at creation (0 for a paid gate).
+    free_gate_fee_paid_mist: u64,
     creator: address,
     timestamp_ms: u64,
 }
@@ -268,6 +300,8 @@ public struct AccessMintedEvent has copy, drop {
     /// 0 for an unlimited pass; otherwise the single-use starting count.
     initial_uses: u64,
     recipient: address,
+    /// Commission paid to the platform treasury for this mint.
+    commission_mist: u64,
     timestamp_ms: u64,
 }
 
@@ -295,9 +329,25 @@ public struct AccessBurnedEvent has copy, drop {
 /// Emitted once when a gate is made immutable (its `AdminCap` renounced).
 public struct GateFrozenEvent has copy, drop {
     gate_id: ID,
-    /// The commission snapshot applied from now on, or `none` if the gate follows the live rate.
-    locked_commission_bps: Option<u64>,
+    /// The commission terms applied from now on, or `none` if the gate follows the live terms.
+    locked_commission: Option<CommissionTerms>,
     timestamp_ms: u64,
+}
+
+/// Emitted when `make_gate_free` sets a gate's price to 0.
+public struct GateMadeFreeEvent has copy, drop {
+    gate_id: ID,
+    /// Free-gate fee paid now (0 if it had already been paid).
+    fee_paid_mist: u64,
+    timestamp_ms: u64,
+}
+
+/// Emitted by every `PlatformConfig` setter with the resulting configuration.
+public struct PlatformConfigUpdatedEvent has copy, drop {
+    treasury: address,
+    commission_bps: u64,
+    min_commission_mist: u64,
+    free_gate_fee_mist: u64,
 }
 
 // ── Initialisation ─────────────────────────────────────────────────────────────
@@ -306,7 +356,8 @@ public struct GateFrozenEvent has copy, drop {
 /// - `Publisher` (kept by publisher; required for future Display updates)
 /// - `Display<AccessNFT>` and `Display<SoulboundAccessNFT>` (transferred to publisher)
 /// - `PlatformAdminCap` (transferred to publisher)
-/// - `PlatformConfig` shared object (commission_bps = 20, treasury = publisher address)
+/// - `PlatformConfig` shared object (treasury = publisher; commission 20 bps with a 0.001 SUI
+///   floor; free-gate fee 0.1 SUI)
 fun init(otw: ACCESS_GATE, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
 
@@ -330,60 +381,45 @@ fun init(otw: ACCESS_GATE, ctx: &mut TxContext) {
     transfer::share_object(PlatformConfig {
         id: object::new(ctx),
         treasury: ctx.sender(),
-        commission_bps: 20,
+        commission_bps: DEFAULT_COMMISSION_BPS,
+        min_commission_mist: DEFAULT_MIN_COMMISSION_MIST,
+        free_gate_fee_mist: DEFAULT_FREE_GATE_FEE_MIST,
     });
 }
 
 // ── Gate lifecycle ──────────────────────────────────────────────────────────────
 
-/// The unrestricted policy (every restriction off) — what `create_gate` applies.
+/// The unrestricted policy (every restriction off).
 public fun default_gate_policy(): GatePolicy {
     GatePolicy {
         freeze_requires_unpaused: false,
         lock_commission_on_freeze: false,
         pause_blocks_decryption: false,
+        pause_blocks_access: false,
     }
 }
 
-/// Build a `GatePolicy` for `create_gate_with_policy` (callable from a PTB).
+/// Build a `GatePolicy` for `create_gate` / `create_free_gate` (callable from a PTB).
 public fun new_gate_policy(
     freeze_requires_unpaused: bool,
     lock_commission_on_freeze: bool,
     pause_blocks_decryption: bool,
+    pause_blocks_access: bool,
 ): GatePolicy {
-    GatePolicy { freeze_requires_unpaused, lock_commission_on_freeze, pause_blocks_decryption }
+    GatePolicy {
+        freeze_requires_unpaused,
+        lock_commission_on_freeze,
+        pause_blocks_decryption,
+        pause_blocks_access,
+    }
 }
 
-/// Create a new access class with the unrestricted default policy. Permissionless: shares the
-/// `Gate` and transfers a bound `AdminCap` to the caller. Display metadata (`nft_name`,
-/// `nft_image_url`, `nft_description`) is copied into every NFT minted from this gate.
+/// Create a **paid** access class. Permissionless: shares the `Gate` and transfers a bound
+/// `AdminCap` to the caller. `price_mist` must be at least `min_paid_price_mist(platform)`
+/// (`E_PRICE_TOO_LOW`); free gates use `create_free_gate`. Display metadata is copied into every
+/// NFT minted from this gate; `policy` is fixed for good.
 public fun create_gate(
-    price_mist: u64,
-    payment_recipient: address,
-    default_uses: u64,
-    soulbound: bool,
-    auto_burn_at_zero: bool,
-    nft_name: String,
-    nft_image_url: String,
-    nft_description: String,
-    ctx: &mut TxContext,
-) {
-    create_gate_with_policy(
-        price_mist,
-        payment_recipient,
-        default_uses,
-        soulbound,
-        auto_burn_at_zero,
-        nft_name,
-        nft_image_url,
-        nft_description,
-        default_gate_policy(),
-        ctx,
-    )
-}
-
-/// `create_gate` with an explicit, immutable `GatePolicy` (build it with `new_gate_policy`).
-public fun create_gate_with_policy(
+    platform: &PlatformConfig,
     price_mist: u64,
     payment_recipient: address,
     default_uses: u64,
@@ -393,6 +429,52 @@ public fun create_gate_with_policy(
     nft_image_url: String,
     nft_description: String,
     policy: GatePolicy,
+    ctx: &mut TxContext,
+) {
+    assert!(price_mist >= min_paid_price_mist(platform), E_PRICE_TOO_LOW);
+    share_new_gate(
+        price_mist, payment_recipient, default_uses, soulbound, auto_burn_at_zero,
+        nft_name, nft_image_url, nft_description, policy, 0, ctx,
+    );
+}
+
+/// Create a **free** access class (price 0), paying the platform's one-off `free_gate_fee_mist`
+/// from `payment` (any excess is refunded). `payment_recipient` receives the proceeds if the gate is
+/// later given a price.
+public fun create_free_gate(
+    platform: &PlatformConfig,
+    payment: Coin<SUI>,
+    payment_recipient: address,
+    default_uses: u64,
+    soulbound: bool,
+    auto_burn_at_zero: bool,
+    nft_name: String,
+    nft_image_url: String,
+    nft_description: String,
+    policy: GatePolicy,
+    ctx: &mut TxContext,
+) {
+    let fee = platform.free_gate_fee_mist;
+    pay_to(payment, fee, platform.treasury, ctx);
+    share_new_gate(
+        0, payment_recipient, default_uses, soulbound, auto_burn_at_zero,
+        nft_name, nft_image_url, nft_description, policy, fee, ctx,
+    );
+}
+
+/// Share a new gate and give its `AdminCap` to the sender. `free_fee_paid_mist` is the free-gate fee
+/// already collected (0 for a paid gate).
+fun share_new_gate(
+    price_mist: u64,
+    payment_recipient: address,
+    default_uses: u64,
+    soulbound: bool,
+    auto_burn_at_zero: bool,
+    nft_name: String,
+    nft_image_url: String,
+    nft_description: String,
+    policy: GatePolicy,
+    free_gate_fee_paid_mist: u64,
     ctx: &mut TxContext,
 ) {
     let gate_uid = object::new(ctx);
@@ -409,6 +491,7 @@ public fun create_gate_with_policy(
         auto_burn_at_zero,
         nft_name,
         policy,
+        free_gate_fee_paid_mist,
         creator: ctx.sender(),
         timestamp_ms: ctx.epoch_timestamp_ms(),
     });
@@ -427,7 +510,8 @@ public fun create_gate_with_policy(
         nft_image_url,
         nft_description,
         policy,
-        locked_commission_bps: option::none(),
+        locked_commission: option::none(),
+        free_fee_paid: price_mist == 0,
     };
 
     transfer::share_object(gate);
@@ -436,11 +520,9 @@ public fun create_gate_with_policy(
 
 // ── Purchase & minting ─────────────────────────────────────────────────────────
 
-/// Buy access. Permissionless. Asserts the gate is live and `payment >= price`, splits
-/// the price: `commission_bps / 10000` to `platform.treasury`, the rest to
-/// `payment_recipient`. Refunds any overpayment and mints the gate's NFT flavour to the
-/// caller.
-#[allow(lint(self_transfer))]
+/// Buy access. Permissionless. Asserts the gate is live and `payment >= price`, pays the platform
+/// commission (`gate_commission_mist`) to the treasury and the rest of the price to
+/// `payment_recipient`, refunds any overpayment and mints the gate's NFT flavour to the caller.
 public fun purchase(
     gate: &Gate,
     platform: &PlatformConfig,
@@ -450,35 +532,52 @@ public fun purchase(
     assert!(!gate.paused, E_PAUSED);
     assert!(payment.value() >= gate.price_mist, E_INSUFFICIENT_PAYMENT);
 
-    if (gate.price_mist > 0) {
-        let commission = commission_for(gate.price_mist, effective_commission_bps(gate, platform));
-        let operator_share = gate.price_mist - commission;
-        if (commission > 0) {
-            let commission_coin = payment.split(commission, ctx);
-            transfer::public_transfer(commission_coin, platform.treasury);
-        };
-        if (operator_share > 0) {
-            let paid = payment.split(operator_share, ctx);
-            transfer::public_transfer(paid, gate.payment_recipient);
-        };
+    let commission = gate_commission_mist(gate, platform);
+    if (commission > 0) {
+        transfer::public_transfer(payment.split(commission, ctx), platform.treasury);
     };
-    // Return any overpayment; destroy an exact/zero-priced remainder.
-    if (payment.value() > 0) {
-        transfer::public_transfer(payment, ctx.sender());
-    } else {
-        payment.destroy_zero();
+    let operator_share = gate.price_mist - commission;
+    if (operator_share > 0) {
+        transfer::public_transfer(payment.split(operator_share, ctx), gate.payment_recipient);
     };
+    refund_or_destroy(payment, ctx);
 
-    mint_and_transfer(gate, ctx.sender(), ctx);
+    mint_and_transfer(gate, ctx.sender(), commission, ctx);
 }
 
-/// AdminCap-gated free grant (airdrop) of the gate's NFT flavour to `recipient`.
-public fun airdrop(cap: &AdminCap, gate: &Gate, recipient: address, ctx: &mut TxContext) {
+/// AdminCap-gated grant of the gate's NFT flavour to `recipient`. The grant is free for the
+/// recipient, but the admin pays the platform the commission a purchase at the current price would
+/// carry (`gate_commission_mist`, 0 for a free gate) from `payment`; any excess is refunded.
+public fun airdrop(
+    cap: &AdminCap,
+    gate: &Gate,
+    platform: &PlatformConfig,
+    payment: Coin<SUI>,
+    recipient: address,
+    ctx: &mut TxContext,
+) {
     assert_admin_mutable(cap, gate);
-    mint_and_transfer(gate, recipient, ctx);
+    let commission = gate_commission_mist(gate, platform);
+    pay_to(payment, commission, platform.treasury, ctx);
+    mint_and_transfer(gate, recipient, commission, ctx);
 }
 
-fun mint_and_transfer(gate: &Gate, recipient: address, ctx: &mut TxContext) {
+/// Take exactly `amount` from `payment` for `recipient` (`E_INSUFFICIENT_PAYMENT` if short) and
+/// refund the remainder to the sender.
+fun pay_to(mut payment: Coin<SUI>, amount: u64, recipient: address, ctx: &mut TxContext) {
+    assert!(payment.value() >= amount, E_INSUFFICIENT_PAYMENT);
+    if (amount > 0) transfer::public_transfer(payment.split(amount, ctx), recipient);
+    refund_or_destroy(payment, ctx);
+}
+
+/// Return a non-zero remainder to the sender; destroy an empty coin.
+#[allow(lint(self_transfer))]
+fun refund_or_destroy(payment: Coin<SUI>, ctx: &TxContext) {
+    if (payment.value() > 0) transfer::public_transfer(payment, ctx.sender())
+    else payment.destroy_zero()
+}
+
+fun mint_and_transfer(gate: &Gate, recipient: address, commission_mist: u64, ctx: &mut TxContext) {
     let gate_id = object::id(gate);
     let data = AccessData {
         gate_id,
@@ -498,6 +597,7 @@ fun mint_and_transfer(gate: &Gate, recipient: address, ctx: &mut TxContext) {
             soulbound: true,
             initial_uses: gate.default_uses,
             recipient,
+            commission_mist,
             timestamp_ms: ts,
         });
         transfer::transfer(nft, recipient);
@@ -509,25 +609,51 @@ fun mint_and_transfer(gate: &Gate, recipient: address, ctx: &mut TxContext) {
             soulbound: false,
             initial_uses: gate.default_uses,
             recipient,
+            commission_mist,
             timestamp_ms: ts,
         });
         transfer::public_transfer(nft, recipient);
     }
 }
 
-/// The commission rate a purchase on `gate` pays: the freeze-time snapshot if the gate locked one,
-/// otherwise the live platform rate.
-public fun effective_commission_bps(gate: &Gate, platform: &PlatformConfig): u64 {
-    if (gate.locked_commission_bps.is_some()) *gate.locked_commission_bps.borrow()
-    else platform.commission_bps
+/// The platform's current commission terms.
+public fun commission_terms(platform: &PlatformConfig): CommissionTerms {
+    CommissionTerms { bps: platform.commission_bps, min_mist: platform.min_commission_mist }
 }
 
-/// Commission owed on `price_mist` at `commission_bps`, rounded **down** (the remainder stays
-/// with the operator). The product is computed in u128 so no `price_mist` can overflow; the
-/// result is ≤ `price_mist` because `commission_bps` ≤ `MAX_COMMISSION_BPS` < `BPS_DENOMINATOR`.
-/// Below `BPS_DENOMINATOR / commission_bps` MIST the commission rounds to zero (dust floor).
-fun commission_for(price_mist: u64, commission_bps: u64): u64 {
-    ((price_mist as u128) * (commission_bps as u128) / (BPS_DENOMINATOR as u128)) as u64
+/// The terms a mint on `gate` pays: the freeze-time snapshot if the gate locked one, otherwise the
+/// live platform terms.
+public fun effective_commission_terms(gate: &Gate, platform: &PlatformConfig): CommissionTerms {
+    if (gate.locked_commission.is_some()) *gate.locked_commission.borrow()
+    else commission_terms(platform)
+}
+
+/// Commission a purchase of `gate` pays right now (0 for a free gate).
+public fun gate_commission_mist(gate: &Gate, platform: &PlatformConfig): u64 {
+    commission_for_price(gate.price_mist, &effective_commission_terms(gate, platform))
+}
+
+/// Commission on `price_mist` under `terms`: `max(price × bps / 10000, min_mist)` (the percentage
+/// part rounded down), never more than `MAX_COMMISSION_BPS` of the price; 0 for a price of 0.
+/// Computed in u128, so no price can overflow; the result is always ≤ `price_mist`.
+public fun commission_for_price(price_mist: u64, terms: &CommissionTerms): u64 {
+    if (price_mist == 0) return 0;
+    let denominator = BPS_DENOMINATOR as u128;
+    let share = (price_mist as u128) * (terms.bps as u128) / denominator;
+    let cap = (price_mist as u128) * (MAX_COMMISSION_BPS as u128) / denominator;
+    let floor = terms.min_mist as u128;
+    let commission = if (share > floor) share else floor;
+    (if (commission > cap) cap else commission) as u64
+}
+
+/// The lowest price a paid gate may have: 10 × the minimum commission (so that floor never exceeds
+/// the 10% cap), and at least 1 MIST.
+public fun min_paid_price_mist(platform: &PlatformConfig): u64 {
+    let min = ((platform.min_commission_mist as u128) * (BPS_DENOMINATOR as u128)
+        + (MAX_COMMISSION_BPS as u128) - 1) / (MAX_COMMISSION_BPS as u128);
+    if (min == 0) 1
+    else if (min > 18_446_744_073_709_551_615) 18_446_744_073_709_551_615
+    else min as u64
 }
 
 fun new_variant(default_uses: u64): AccessVariant {
@@ -543,7 +669,8 @@ fun new_variant(default_uses: u64): AccessVariant {
 /// Spend one use of a transferable single-use NFT, binding the spend to `nonce`. If the
 /// NFT reaches zero and the gate has `auto_burn_at_zero`, it is deleted; otherwise it is
 /// returned to the caller as a receipt (an intentional self-transfer). Aborts on an
-/// unlimited pass or zero uses.
+/// unlimited pass or zero uses, and with `E_PAUSED` while the gate is paused if its policy has
+/// `pause_blocks_access`.
 #[allow(lint(self_transfer))]
 public fun consume(mut nft: AccessNFT, gate: &Gate, nonce: vector<u8>, ctx: &mut TxContext) {
     let nft_id = object::id(&nft);
@@ -592,6 +719,7 @@ fun consume_data(
 ): bool {
     assert!(vector::length(&nonce) >= MIN_NONCE_LENGTH, E_INVALID_NONCE);
     assert!(data.gate_id == object::id(gate), E_WRONG_GATE);
+    assert!(!(gate.paused && gate.policy.pause_blocks_access), E_PAUSED);
     let gate_id = data.gate_id;
     let auto_burn = gate.auto_burn_at_zero;
     match (&mut data.variant) {
@@ -662,8 +790,8 @@ fun assert_admin_mutable(cap: &AdminCap, gate: &Gate) {
 /// Policy-dependent behaviour:
 /// - freezing a **paused** gate is allowed (it then never sells again) unless the gate's policy has
 ///   `freeze_requires_unpaused`, in which case this aborts with `E_FREEZE_WHILE_PAUSED`;
-/// - with `lock_commission_on_freeze`, the current `platform.commission_bps` is snapshotted and used
-///   for every later purchase of this gate.
+/// - with `lock_commission_on_freeze`, the current platform commission terms are snapshotted and
+///   used for every later purchase of this gate.
 ///
 /// Perform any final `set_*`/`airdrop` BEFORE calling this. Mirrors
 /// `0x2::package::make_immutable` for a package's `UpgradeCap`.
@@ -676,22 +804,47 @@ public fun make_gate_immutable(
     assert_admin_mutable(&cap, gate);
     if (gate.policy.freeze_requires_unpaused) assert!(!gate.paused, E_FREEZE_WHILE_PAUSED);
     if (gate.policy.lock_commission_on_freeze) {
-        gate.locked_commission_bps = option::some(platform.commission_bps);
+        gate.locked_commission = option::some(commission_terms(platform));
     };
     gate.frozen = true;
     event::emit(GateFrozenEvent {
         gate_id: object::id(gate),
-        locked_commission_bps: gate.locked_commission_bps,
+        locked_commission: gate.locked_commission,
         timestamp_ms: ctx.epoch_timestamp_ms(),
     });
     let AdminCap { id, gate_id: _ } = cap;
     id.delete();
 }
 
-/// Update the gate price for future purchases (does not affect in-flight transactions).
-public fun set_price(cap: &AdminCap, gate: &mut Gate, price_mist: u64) {
+/// Update the gate price for future purchases. A paid price must be at least
+/// `min_paid_price_mist(platform)` (`E_PRICE_TOO_LOW`); 0 is allowed only once the free-gate fee
+/// has been paid (`E_FREE_FEE_UNPAID` — use `make_gate_free`).
+public fun set_price(cap: &AdminCap, gate: &mut Gate, platform: &PlatformConfig, price_mist: u64) {
     assert_admin_mutable(cap, gate);
+    if (price_mist == 0) assert!(gate.free_fee_paid, E_FREE_FEE_UNPAID)
+    else assert!(price_mist >= min_paid_price_mist(platform), E_PRICE_TOO_LOW);
     gate.price_mist = price_mist;
+}
+
+/// Make the gate free (price 0), paying the platform's `free_gate_fee_mist` from `payment` unless it
+/// was already paid for this gate; any excess is refunded.
+public fun make_gate_free(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    payment: Coin<SUI>,
+    ctx: &mut TxContext,
+) {
+    assert_admin_mutable(cap, gate);
+    let fee = if (gate.free_fee_paid) 0 else platform.free_gate_fee_mist;
+    pay_to(payment, fee, platform.treasury, ctx);
+    gate.free_fee_paid = true;
+    gate.price_mist = 0;
+    event::emit(GateMadeFreeEvent {
+        gate_id: object::id(gate),
+        fee_paid_mist: fee,
+        timestamp_ms: ctx.epoch_timestamp_ms(),
+    });
 }
 
 /// Redirect future purchase payments to a new recipient address.
@@ -700,7 +853,7 @@ public fun set_payment_recipient(cap: &AdminCap, gate: &mut Gate, recipient: add
     gate.payment_recipient = recipient;
 }
 
-/// Pause or unpause `purchase`. When paused, `purchase` aborts with `E_PAUSED`.
+/// Pause or unpause `purchase` (and, per the gate's policy, `consume` and dependent access).
 public fun set_paused(cap: &AdminCap, gate: &mut Gate, paused: bool) {
     assert_admin_mutable(cap, gate);
     gate.paused = paused;
@@ -746,7 +899,7 @@ public fun set_nft_description(cap: &AdminCap, gate: &mut Gate, description: Str
 
 // ── Platform admin setters ──────────────────────────────────────────────────────
 
-/// Update the platform treasury address (where commission payments are routed).
+/// Update the platform treasury address (where commission and fees are routed).
 public fun set_platform_treasury(
     _cap: &PlatformAdminCap,
     config: &mut PlatformConfig,
@@ -754,6 +907,7 @@ public fun set_platform_treasury(
 ) {
     assert!(treasury != @0x0, E_ZERO_ADDRESS);
     config.treasury = treasury;
+    emit_platform_updated(config);
 }
 
 /// Update the platform commission rate. Hard cap: 1000 bps (10%).
@@ -764,6 +918,37 @@ public fun set_commission_bps(
 ) {
     assert!(commission_bps <= MAX_COMMISSION_BPS, E_COMMISSION_TOO_HIGH);
     config.commission_bps = commission_bps;
+    emit_platform_updated(config);
+}
+
+/// Update the commission floor. Existing gates keep their price; their commission stays capped at
+/// 10% of it. New and re-priced paid gates must meet the new `min_paid_price_mist`.
+public fun set_min_commission_mist(
+    _cap: &PlatformAdminCap,
+    config: &mut PlatformConfig,
+    min_commission_mist: u64,
+) {
+    config.min_commission_mist = min_commission_mist;
+    emit_platform_updated(config);
+}
+
+/// Update the one-off fee for making a gate free (affects gates made free from now on).
+public fun set_free_gate_fee_mist(
+    _cap: &PlatformAdminCap,
+    config: &mut PlatformConfig,
+    free_gate_fee_mist: u64,
+) {
+    config.free_gate_fee_mist = free_gate_fee_mist;
+    emit_platform_updated(config);
+}
+
+fun emit_platform_updated(config: &PlatformConfig) {
+    event::emit(PlatformConfigUpdatedEvent {
+        treasury: config.treasury,
+        commission_bps: config.commission_bps,
+        min_commission_mist: config.min_commission_mist,
+        free_gate_fee_mist: config.free_gate_fee_mist,
+    });
 }
 
 // ── Views ───────────────────────────────────────────────────────────────────────
@@ -829,16 +1014,27 @@ public fun gate_freeze_requires_unpaused(gate: &Gate): bool { gate.policy.freeze
 /// True if freezing snapshots the platform commission for this gate.
 public fun gate_lock_commission_on_freeze(gate: &Gate): bool { gate.policy.lock_commission_on_freeze }
 
-/// True if dependent access policies (e.g. Seal `nft_gate`) must deny access while paused.
+/// True if dependent decryption policies (Seal `nft_gate`) must deny access while paused.
 public fun gate_pause_blocks_decryption(gate: &Gate): bool { gate.policy.pause_blocks_decryption }
 
-/// The freeze-time commission snapshot, if this gate locked one.
-public fun gate_locked_commission_bps(gate: &Gate): Option<u64> { gate.locked_commission_bps }
+/// True if `consume` and access gateways must deny holders while the gate is paused.
+public fun gate_pause_blocks_access(gate: &Gate): bool { gate.policy.pause_blocks_access }
+
+/// The freeze-time commission terms, if this gate locked them.
+public fun gate_locked_commission(gate: &Gate): Option<CommissionTerms> { gate.locked_commission }
+
+/// True once the free-gate fee has been paid for this gate (its price may then be 0).
+public fun gate_free_fee_paid(gate: &Gate): bool { gate.free_fee_paid }
 
 /// `GatePolicy` field accessors (for PTBs / other packages holding a policy value).
 public fun policy_freeze_requires_unpaused(p: &GatePolicy): bool { p.freeze_requires_unpaused }
 public fun policy_lock_commission_on_freeze(p: &GatePolicy): bool { p.lock_commission_on_freeze }
 public fun policy_pause_blocks_decryption(p: &GatePolicy): bool { p.pause_blocks_decryption }
+public fun policy_pause_blocks_access(p: &GatePolicy): bool { p.pause_blocks_access }
+
+/// `CommissionTerms` field accessors.
+public fun terms_bps(t: &CommissionTerms): u64 { t.bps }
+public fun terms_min_mist(t: &CommissionTerms): u64 { t.min_mist }
 
 /// Object ID of the `AdminCap` authorised over this gate.
 public fun gate_admin_cap_id(gate: &Gate): ID { gate.admin_cap_id }
@@ -860,6 +1056,12 @@ public fun platform_treasury(config: &PlatformConfig): address { config.treasury
 
 /// Commission rate in basis points (20 = 0.2%). Hard cap: 1000 bps.
 public fun platform_commission_bps(config: &PlatformConfig): u64 { config.commission_bps }
+
+/// Floor on a paid mint's commission, in MIST.
+public fun platform_min_commission_mist(config: &PlatformConfig): u64 { config.min_commission_mist }
+
+/// One-off fee to make a gate free, in MIST.
+public fun platform_free_gate_fee_mist(config: &PlatformConfig): u64 { config.free_gate_fee_mist }
 
 // ── Test-only helpers ─────────────────────────────────────────────────────────────
 
@@ -887,11 +1089,8 @@ public fun burn_admin_cap_for_testing(cap: AdminCap) {
 /// Create and share a `PlatformConfig` with zero commission for tests that check exact
 /// payment amounts. Take it with `ts::take_shared<PlatformConfig>()` after `next_tx`.
 public fun share_platform_config_zero_commission_for_testing(ctx: &mut TxContext) {
-    transfer::share_object(PlatformConfig {
-        id: object::new(ctx),
-        treasury: ctx.sender(),
-        commission_bps: 0,
-    });
+    let treasury = ctx.sender();
+    share_platform_config_full_for_testing(treasury, 0, 0, 0, ctx);
 }
 
 #[test_only]
@@ -899,11 +1098,31 @@ public fun share_platform_config_zero_commission_for_testing(ctx: &mut TxContext
 /// that exercise the commission split. (Bypasses the `set_commission_bps` cap by construction —
 /// use `set_commission_bps` itself to test the `E_COMMISSION_TOO_HIGH` boundary.)
 public fun share_platform_config_for_testing(treasury: address, commission_bps: u64, ctx: &mut TxContext) {
+    share_platform_config_full_for_testing(treasury, commission_bps, 0, 0, ctx);
+}
+
+#[test_only]
+/// Create and share a `PlatformConfig` with every term explicit.
+public fun share_platform_config_full_for_testing(
+    treasury: address,
+    commission_bps: u64,
+    min_commission_mist: u64,
+    free_gate_fee_mist: u64,
+    ctx: &mut TxContext,
+) {
     transfer::share_object(PlatformConfig {
         id: object::new(ctx),
         treasury,
         commission_bps,
+        min_commission_mist,
+        free_gate_fee_mist,
     });
+}
+
+#[test_only]
+/// Build `CommissionTerms` directly (for `commission_for_price` tests).
+public fun commission_terms_for_testing(bps: u64, min_mist: u64): CommissionTerms {
+    CommissionTerms { bps, min_mist }
 }
 
 #[test_only]
