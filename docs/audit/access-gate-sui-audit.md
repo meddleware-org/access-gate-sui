@@ -240,6 +240,19 @@ SPDX headers: CC0-1.0.
 commission_bps: 20}` shared; `PlatformAdminCap`, `Publisher` (from this module), both `Display` to the
 publisher.
 
+### F23 — docs./dev. sites import the canonical on-chain docs only after npm publication
+**Severity:** Info   **Disposition:** DEFERRED (exact remediation below)
+**Where:** `repos/docs` and `repos/dev` — `scripts/gen-onchain.mjs` resolves `@meddleware/access-gate-sui` from
+`node_modules`.
+**Issue:** the canonical `docs/onchain/*` pages ship in `@meddleware/access-gate-sui` from version `0.0.2`. Until
+that version is on npm and installed in both sites, their builds render placeholder pages for this
+package (by design — builds never fail). Verified locally with `ONCHAIN_DOCS_ROOT=..` (all pages
+imported, no dead links, lint/type-check green).
+**Remediation:** publish `@meddleware/access-gate-sui@0.0.2` (push the release tag; `npm-publish.yml`), then in both
+`repos/docs` and `repos/dev`: `npm install -D @meddleware/access-gate-sui@0.0.2` → commit `package.json` +
+`package-lock.json` → `npm run build` and confirm the `[gen:onchain]` log shows imported pages
+(no placeholder) → release the site images.
+
 ---
 
 ## Section A — Invariant verification matrix
@@ -359,6 +372,7 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
 
 ### pre-testnet
 
+- [ ] docs./dev. sites install the published `@meddleware/access-gate-sui` and import its on-chain docs — F23
 - [x] published — canonical `0x0bedd0…` (predates F10/F11)
 - [ ] package ID recorded consistently across `Move.toml` / `SECURITY.md` / consumers — F14 (OQ7)
 - [x] dependants pin commit SHAs (seal-policies `f191c2d`) — F15
