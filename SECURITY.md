@@ -9,7 +9,8 @@ This policy covers security issues in:
   arithmetic over/underflow, or a bypass of the gate-freeze (immutability) guard
 - The published testnet package at
   `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4` (and the superseded
-  `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d` while gates on it are live)
+  `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d` while gates created on it
+  are in use)
 - The deployment scripts (`scripts/publish.sh`) as they affect capability custody
 
 It does not cover:

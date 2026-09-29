@@ -5,7 +5,7 @@
 **Project type:** Move package
 **Template:** AUDIT_TEMPLATE.md (2026-09-28) + AUDIT_TEMPLATE_SUI.md (2026-09-28)
 **Package:** `access_gate` v0.0.2; edition 2024; framework rev `b0535f1f3a33` (Move.lock, testnet)
-**Deployment status:** testnet — package `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4` (published 2026-09-28 from `dcd2d3c`; `PlatformConfig` `0xe3b949ca…23f7`; UpgradeCap `0xf04a1d87…32bc` **live**, compatible policy, publisher EOA). Superseded: `0x0bedd0…d20d` (pre-policy source; still holds the live Walrus relay gate `0x0485…` until it migrates; UpgradeCap burned). Strays `0x692547…68bc`, `0x891cc2…985c`, `0xbd2b4f…7f79` (unused publishes; UpgradeCaps burned). Mainnet: unpublished.
+**Deployment status:** testnet — package `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4` (published 2026-09-28 from `dcd2d3c`; `PlatformConfig` `0xe3b949ca…23f7`; UpgradeCap `0xf04a1d87…32bc` **live**, compatible policy, publisher EOA). Superseded: `0x0bedd0…d20d` (pre-policy source; its gates, including the former Walrus relay gate `0x0485…`, stay on it; UpgradeCap burned). The live Walrus relay gate is `0xcb8206…5f50` on `0x1a81ca…`. Strays `0x692547…68bc`, `0x891cc2…985c`, `0xbd2b4f…7f79` (unused publishes; UpgradeCaps burned). Mainnet: unpublished.
 **Review date:** 2026-09-18 (first pass) · re-verified and relocated 2026-09-28
 **Reviewer:** Internal review (Move contract reviewer)
 **Severity ceiling:** High — the package handles on-chain SUI payments and a platform commission split; a capability or accounting flaw could misroute funds. Realized ceiling: **Medium** (F1, F10, F12 — all RESOLVED in source/tooling).
@@ -51,8 +51,8 @@ fungible token or foreign NFT can never stand in for a pass). The source was the
 `0x1a81ca…`, and every stray and superseded `UpgradeCap` burned (**F31**).
 
 What remains is operational: custody of the new `UpgradeCap` and of platform authority (F2/F3 —
-an **operator requirement before launch**; burn vs multisig still to be chosen), and migrating the
-live Walrus relay gate and the apps to `0x1a81ca…` (they ship with the unpublished npm releases).
+an **operator requirement before launch**; burn vs multisig still to be chosen). The live Walrus
+relay gate and the apps have moved to `0x1a81ca…` (released 2026-09-29).
 
 ---
 
@@ -297,7 +297,7 @@ enforced by `seal_policies::nft_gate` (`E_GATE_PAUSED = 4`), not here.
 tool config: `access-gate-ui` `e91781a` (`VITE_GATE_*`, all default `false`).
 **Impact on release:** the `Gate` struct layout and the public `make_gate_immutable` signature
 changed, which a compatible upgrade forbids — the release is a **new package**; gates of `0x0bedd0…`
-(including the live paywall gate) stay on the old version.
+(including the paywall gate of the time) stay on the old version.
 
 ### F25 — Dust prices pay no commission
 **Severity:** Info   **Disposition:** RESOLVED at the tool layer (OQ11 answered)
@@ -516,9 +516,12 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
 - [x] custody/immutability tooling with dry-run default + explicit confirmation — F12/F13
 - [x] fresh publish; seal-policies republished against it (`0x42cc18…`); consumer defaults and docs
   point at the new IDs (in each repo, unreleased)
-- [ ] push access-gate-sui, then regenerate seal-policies' `Move.lock` (CI red until then)
-- [ ] release the npm packages and apps that target the new ABI, and migrate the live Walrus relay
-  gate (walrus-ui `VITE_ACCESS_GATE_ID_TESTNET` + Worker `GATE_ID`/`NFT_TYPE`) in one step
+- [x] push access-gate-sui, then regenerate seal-policies' `Move.lock` (seal-policies `32c8978`)
+- [x] release the npm packages and apps that target the new ABI, and migrate the live Walrus relay
+  gate (walrus-ui `VITE_ACCESS_GATE_ID_TESTNET` + Worker `GATE_ID`/`NFT_TYPE`) in one step — gate
+  `0xcb8206…5f50` (type `0x1a81ca…::access_gate::Gate`, gRPC read 2026-09-29); walrus-ui 0.1.42,
+  dashboard 0.1.62 and the nft-gate Worker released; paywall verified live (purchase → consume →
+  proof admitted; no proof → 401)
 
 ### pre-mainnet
 
@@ -662,3 +665,7 @@ their version; verifiers subscribe to every trusted package ID (see `SECURITY.md
   (F31). 60/60 tests. OQ13–OQ15 answered; OQ16 added. Live checks: `nft-gate-client` gRPC read tests
   against the new `PlatformConfig` pass; seal timelock round-trip on the republished `seal_policies`
   passes.
+- 2026-09-29 — relay gate migrated: `0xcb8206…5f50` is a `0x1a81ca…::access_gate::Gate` (testnet
+  gRPC); walrus-ui, dashboard and the Worker released against it; live paywall round-trip passes.
+  Section D pre-testnet rows for the push/lock and the release closed; stale "still holds the live
+  gate" notes in `Move.toml`, `README.md`, `SECURITY.md` and the API reference updated.

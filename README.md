@@ -71,9 +71,9 @@ package links against:
 
 ```toml
 [dependencies]
-# f191c2d resolves access_gate to the canonical testnet package 0x0bedd0… (used by every live
-# consumer and the live gates). See docs/audit/access-gate-sui-audit.md for the address question.
-access_gate = { git = "https://github.com/meddleware-org/access-gate-sui.git", rev = "f191c2d338006c056d4ecfafa9bb0404afed37a5" }
+# dcd2d3c records the testnet publication 0x1a81ca… (Published.toml), which the live consumers
+# and gates use. See docs/audit/access-gate-sui-audit.md for the address history.
+access_gate = { git = "https://github.com/meddleware-org/access-gate-sui.git", rev = "dcd2d3c2f918904950e8cb079d0c648fc79475f3" }
 ```
 
 **Release = push a tag.** There is no registry publish step and no CI publish job: a version is

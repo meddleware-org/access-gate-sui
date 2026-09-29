@@ -4,8 +4,8 @@ name = "access_gate"
 version = "0.0.2"
 license = "0BSD"
 # No `published-at`: the testnet publication of this source is recorded in Published.toml
-# (Sui >= 1.80) — package 0x1a81ca17…eea4. Superseded: 0x0bedd0b2…d20d (pre-policy source; still
-# holds the live Walrus paywall gate until it migrates). Strays 0x692547ae…68bc and 0x891cc27c…985c
+# (Sui >= 1.80) — package 0x1a81ca17…eea4. Superseded: 0x0bedd0b2…d20d (pre-policy source; its
+# gates stay on it). Strays 0x692547ae…68bc and 0x891cc27c…985c
 # are unused test publishes whose UpgradeCaps were burned (see docs/audit, F14).
 
 [dependencies]

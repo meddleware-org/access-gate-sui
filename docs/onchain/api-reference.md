@@ -144,6 +144,5 @@ Codes are unique within this module only — disambiguate by `(module, code)`.
 - After `make_gate_immutable`, no privileged operation on that gate can ever succeed.
 - A gate's `policy` never changes; `locked_commission` is set at most once (at freeze).
 
-Package version note: the superseded testnet package `0x0bedd0…` (which still holds the live Walrus
-relay gate until it migrates) predates all of the above except the base purchase/consume flow: it
-multiplies in u64, has no codes 9–12, no policies, fees or airdrop commission.
+Package version note: the superseded testnet package `0x0bedd0…` (gates created on it stay there)
+predates all of the above except the base purchase/consume flow: it multiplies in u64, has no codes 9–12, no policies, fees or airdrop commission.
