@@ -147,7 +147,7 @@ PUBLISH_JSON_CLEAN=$(echo "$PUBLISH_JSON" | awk '/^{/,0')
 echo "$PUBLISH_JSON_CLEAN" | jq -e '.objectChanges' > /dev/null 2>&1 \
     || { log "ERROR: publish output has no objectChanges; refusing to guess object IDs."; exit 1; }
 PACKAGE_ID=$(echo "$PUBLISH_JSON_CLEAN" | jq -r '.objectChanges[] | select(.type=="published") | .packageId')
-[ -n "$PACKAGE_ID" ] && [ "$PACKAGE_ID" != "null" ] || { log "ERROR: could not parse packageId"; exit 1; }
+if [ -z "$PACKAGE_ID" ] || [ "$PACKAGE_ID" = "null" ]; then log "ERROR: could not parse packageId"; exit 1; fi
 
 # created_id <exact objectType> — the single created object of that type (empty if none).
 created_id() {
@@ -241,7 +241,9 @@ if [ "$CREATE_GATE" == "--create-gate" ]; then
   }
   GATE_ID=$(gate_created_id Gate)
   ADMIN_CAP_ID=$(gate_created_id AdminCap)
-  [ -n "$GATE_ID" ] && [ -n "$ADMIN_CAP_ID" ] || { log "ERROR: gate transaction output had no Gate/AdminCap:"; log "$GATE_JSON"; exit 1; }
+  if [ -z "$GATE_ID" ] || [ -z "$ADMIN_CAP_ID" ]; then
+    log "ERROR: gate transaction output had no Gate/AdminCap:"; log "$GATE_JSON"; exit 1
+  fi
 
   {
     echo "ACCESS_GATE_GATE_ID=$GATE_ID"
