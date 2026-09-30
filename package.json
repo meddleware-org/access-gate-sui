@@ -21,11 +21,15 @@
     "test": "sui move test --build-env testnet"
   },
   "exports": {
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./Published.toml": "./Published.toml",
+    "./deployments.json": "./deployments.json"
   },
   "files": [
     "Move.toml",
     "Move.lock",
+    "deployments.json",
+    "Published.toml",
     "sources/",
     "docs/",
     "README.md",

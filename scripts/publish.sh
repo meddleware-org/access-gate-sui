@@ -187,6 +187,15 @@ fi
 } > "$ENV_FILE"
 log "Published. packageId=$PACKAGE_ID"
 log "Wrote $ENV_FILE"
+# Committed record of the shared objects consumers need (Published.toml holds the package IDs);
+# @meddleware/access-gate-client generates its `deployments` export from both files.
+if [ "$NETWORK" != "localnet" ]; then
+    DEPLOYMENTS="$PKG_DIR/deployments.json"
+    [ -f "$DEPLOYMENTS" ] || echo '{}' > "$DEPLOYMENTS"
+    jq --arg n "$NETWORK" --arg id "$PLATFORM_CONFIG_ID" '.[$n].platformConfigId = $id' "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
+    mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
+    log "Recorded platformConfigId in $DEPLOYMENTS — commit it with Published.toml."
+fi
 log "Recovery: every ID above is in $ENV_FILE; if a later step fails, re-run only that step (e.g. the gate"
 log "          PTB below) against ACCESS_GATE_PACKAGE_ID / ACCESS_GATE_PLATFORM_CONFIG_ID — never re-publish."
 

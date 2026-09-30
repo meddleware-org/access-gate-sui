@@ -86,6 +86,11 @@ git tag v0.0.2 && git push origin v0.0.2
 (The on-chain deployment is separate — `./scripts/publish.sh testnet` — and only needs redoing when
 the Move source changes.)
 
+**Deployment records.** `Published.toml` holds the package IDs per network (published-at and
+original-id); `deployments.json` holds the shared objects consumers need (`platformConfigId`),
+written by `publish.sh`. Both ship in the npm package, and `@meddleware/access-gate-client`
+generates its `deployments` export from them — commit both after every publish.
+
 ## Operations runbook
 
 Every script refuses to sign unless the active `sui client` env **is** the target network (it
