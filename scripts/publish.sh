@@ -32,6 +32,14 @@
 #   GATE_PAUSE_BLOCKS_DECRYPTION / GATE_PAUSE_BLOCKS_ACCESS
 #                          default false    (immutable GatePolicy flags)
 #   GAS_BUDGET             default 200000000
+#
+# Safety (preflight, before anything is signed):
+#   - the ACTIVE `sui client` env must already be <network> (the script never switches it —
+#     run `sui client switch --env <network>` yourself);
+#   - testnet/mainnet: the chain identifier must match the network;
+#   - the `sui` CLI major.minor must match Published.toml `toolchain-version` (patch drift warns);
+#   - mainnet additionally requires MAINNET_CONFIRM=1.
+# An existing .env.<network> is kept as .env.<network>.<timestamp>.bak, never overwritten.
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -66,13 +74,45 @@ ENV_FILE="$PKG_DIR/.env.${NETWORK}"
 
 command -v jq >/dev/null || { log "ERROR: jq is required"; exit 1; }
 
-# Switch to target Sui environment.
-log "Switching to Sui environment: ${NETWORK} ..."
-sui client switch --env "$NETWORK" || {
-    log "ERROR: unknown environment '${NETWORK}'."
-    log "Add it with: sui client new-env --alias ${NETWORK} --rpc <rpc-url>"
+# ── Preflight (hard failures; nothing is signed before these pass) ────────────────────────────
+# Chain identifiers of the public networks (`sui client chain-identifier`, hex form).
+expected_chain_id() { case "$1" in testnet) echo 4c78adac ;; mainnet) echo 35834a8a ;; *) echo "" ;; esac; }
+# Published.toml `toolchain-version` for a network (falls back to the testnet record).
+toolchain_version() {
+    local v
+    v=$(awk -v s="[published.$1]" '$0==s{f=1;next} /^\[/{f=0} f && /^toolchain-version/{gsub(/.*= *"|".*/,"");print;exit}' "$PKG_DIR/Published.toml" 2>/dev/null)
+    [ -n "$v" ] || v=$(awk '$0=="[published.testnet]"{f=1;next} /^\[/{f=0} f && /^toolchain-version/{gsub(/.*= *"|".*/,"");print;exit}' "$PKG_DIR/Published.toml" 2>/dev/null)
+    echo "$v"
+}
+
+ACTIVE_ENV=$(sui client active-env 2>/dev/null || true)
+[ "$ACTIVE_ENV" = "$NETWORK" ] || {
+    log "ERROR: the active Sui env is '${ACTIVE_ENV:-<none>}', not '${NETWORK}'. This script never switches it."
+    log "       Run: sui client switch --env ${NETWORK}   (add it first with: sui client new-env --alias ${NETWORK} --rpc <rpc-url>)"
     exit 1
 }
+WANT_CHAIN=$(expected_chain_id "$NETWORK")
+if [ -n "$WANT_CHAIN" ]; then
+    # Note: `sui client chain-identifier` caches the id in client.yaml (harmless).
+    CHAIN=$(sui client chain-identifier 2>/dev/null | awk '/^Hex:/{print $2; exit} !/:/{print $1; exit}')
+    [ "$CHAIN" = "$WANT_CHAIN" ] || { log "ERROR: chain identifier is '${CHAIN:-<unreachable>}', expected ${WANT_CHAIN} for ${NETWORK}."; exit 1; }
+fi
+WANT_TOOL=$(toolchain_version "$NETWORK")
+CLI_VER=$(sui --version | awk '{print $2}' | cut -d- -f1)
+if [ -n "$WANT_TOOL" ]; then
+    if [ "${CLI_VER%.*}" != "${WANT_TOOL%.*}" ]; then
+        log "ERROR: sui CLI ${CLI_VER} does not match Published.toml toolchain-version ${WANT_TOOL} (major.minor)."
+        log "       Install it with: suiup install sui@testnet-v${WANT_TOOL} && suiup switch sui@testnet-v${WANT_TOOL}"
+        exit 1
+    elif [ "$CLI_VER" != "$WANT_TOOL" ]; then
+        log "WARNING: sui CLI ${CLI_VER} differs from toolchain-version ${WANT_TOOL} at patch level."
+    fi
+fi
+if [ "$NETWORK" = "mainnet" ] && [ "${MAINNET_CONFIRM:-}" != "1" ]; then
+    log "SKIPPED: mainnet publishes real assets; re-run with MAINNET_CONFIRM=1 to proceed."
+    exit 78
+fi
+log "Preflight OK: env=${NETWORK} chain=${CHAIN:-n/a} cli=${CLI_VER} signer=$(sui client active-address)"
 
 # Print active RPC endpoint for confirmation.
 ACTIVE_RPC=$(sui client envs --json 2>/dev/null \
@@ -128,6 +168,12 @@ unset _v
 ACCESS_NFT_TYPE="${PACKAGE_ID}::access_gate::AccessNFT"
 SOULBOUND_NFT_TYPE="${PACKAGE_ID}::access_gate::SoulboundAccessNFT"
 
+# Never overwrite a previous deployment record.
+if [ -f "$ENV_FILE" ]; then
+    BACKUP="${ENV_FILE}.$(date -u +%Y%m%dT%H%M%SZ).bak"
+    mv "$ENV_FILE" "$BACKUP"
+    log "Kept the previous record as $BACKUP"
+fi
 {
   echo "ACCESS_GATE_PACKAGE_ID=$PACKAGE_ID"
   echo "ACCESS_GATE_UPGRADE_CAP_ID=$UPGRADE_CAP_ID"
@@ -141,6 +187,8 @@ SOULBOUND_NFT_TYPE="${PACKAGE_ID}::access_gate::SoulboundAccessNFT"
 } > "$ENV_FILE"
 log "Published. packageId=$PACKAGE_ID"
 log "Wrote $ENV_FILE"
+log "Recovery: every ID above is in $ENV_FILE; if a later step fails, re-run only that step (e.g. the gate"
+log "          PTB below) against ACCESS_GATE_PACKAGE_ID / ACCESS_GATE_PLATFORM_CONFIG_ID — never re-publish."
 
 if [ "$CREATE_GATE" == "--create-gate" ]; then
   PRICE="${GATE_PRICE_MIST:-0}"
@@ -166,24 +214,24 @@ if [ "$CREATE_GATE" == "--create-gate" ]; then
       --split-coins gas "[$FEE]" --assign fee \
       --move-call "${PACKAGE_ID}::access_gate::new_gate_policy" "${POLICY_ARGS[@]}" --assign policy \
       --move-call "${PACKAGE_ID}::access_gate::create_free_gate" "@$PLATFORM_CONFIG_ID" fee.0 "@$RECIPIENT" \
-        "$USES" "$SOULBOUND" "$AUTO_BURN" "$(q "$NFT_NAME")" "$(q "$NFT_IMAGE_URL")" "$(q "$NFT_DESCRIPTION")" policy)
+        "$USES" "$SOULBOUND" "$AUTO_BURN" "$(q "$NFT_NAME")" "$(q "$NFT_IMAGE_URL")" "$(q "$NFT_DESCRIPTION")" policy \
+      --json)
   else
     GATE_JSON=$(sui client ptb --gas-budget "$GAS_BUDGET" \
       --move-call "${PACKAGE_ID}::access_gate::new_gate_policy" "${POLICY_ARGS[@]}" --assign policy \
       --move-call "${PACKAGE_ID}::access_gate::create_gate" "@$PLATFORM_CONFIG_ID" "$PRICE" "@$RECIPIENT" \
-        "$USES" "$SOULBOUND" "$AUTO_BURN" "$(q "$NFT_NAME")" "$(q "$NFT_IMAGE_URL")" "$(q "$NFT_DESCRIPTION")" policy)
+        "$USES" "$SOULBOUND" "$AUTO_BURN" "$(q "$NFT_NAME")" "$(q "$NFT_IMAGE_URL")" "$(q "$NFT_DESCRIPTION")" policy \
+      --json)
   fi
-  # `sui client ptb` (CLI 1.80) prints its result as a table even with --json; read each created
-  # object's ID from the "Object Changes" block by its exact type.
-  created_from_table() {
-    echo "$GATE_JSON" | awk -v t="${PACKAGE_ID}::access_gate::$1" '
-      { for (i = 1; i < NF; i++) {
-          if ($i == "ObjectID:") id = $(i + 1)
-          if ($i == "ObjectType:" && $(i + 1) == t) print id
-      } }'
+  # Machine output: the single created object of each exact type (as for the publish above).
+  # `--json` must come AFTER the other `ptb` options: placed right after `ptb` it is ignored and a
+  # table is printed (CLI 1.80, verified on localnet 2026-09-30).
+  gate_created_id() {
+    echo "$GATE_JSON" | awk '/^{/,0' | jq -r --arg t "${PACKAGE_ID}::access_gate::$1" \
+      '[.objectChanges[] | select(.type=="created" and .objectType==$t) | .objectId] | if length==1 then .[0] else "" end'
   }
-  GATE_ID=$(created_from_table Gate)
-  ADMIN_CAP_ID=$(created_from_table AdminCap)
+  GATE_ID=$(gate_created_id Gate)
+  ADMIN_CAP_ID=$(gate_created_id AdminCap)
   [ -n "$GATE_ID" ] && [ -n "$ADMIN_CAP_ID" ] || { log "ERROR: gate transaction output had no Gate/AdminCap:"; log "$GATE_JSON"; exit 1; }
 
   {
@@ -199,8 +247,9 @@ if [ "$MAKE_IMMUTABLE" = "--make-immutable" ]; then
     else
         log "WARNING: About to burn UpgradeCap $UPGRADE_CAP_ID for package $PACKAGE_ID."
         log "         This is PERMANENTLY IRREVERSIBLE. The package can never be upgraded."
-        read -r -p "         Type YES to confirm: " CONFIRM
-        [ "$CONFIRM" = "YES" ] || { log "Aborted."; exit 1; }
+        # A separate, specific confirmation: the earlier steps' consent does not cover this one.
+        read -r -p "         Type BURN ${UPGRADE_CAP_ID:0:10} to confirm: " CONFIRM
+        [ "$CONFIRM" = "BURN ${UPGRADE_CAP_ID:0:10}" ] || { log "Aborted (UpgradeCap kept; burn later with 0x2::package::make_immutable)."; exit 1; }
         sui client call --json --gas-budget "$GAS_BUDGET" \
             --package 0x2 --module package --function make_immutable \
             --args "$UPGRADE_CAP_ID"

@@ -1,6 +1,6 @@
 {
   "name": "@meddleware/access-gate-sui",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": false,
   "type": "module",
   "author": "MeddleWare <dev@meddleware.co.uk>",

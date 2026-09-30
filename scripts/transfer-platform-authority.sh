@@ -59,8 +59,28 @@ MULTISIG_ADDRESS="${MULTISIG_ADDRESS:-${POSITIONAL[0]:-}}"
 PACKAGE_ID="${ACCESS_GATE_PACKAGE_ID:-${PACKAGE_ID:-}}"
 [[ -n "$PACKAGE_ID" ]] || { warn "ERROR: ACCESS_GATE_PACKAGE_ID not set — run publish.sh or source .env.${NETWORK}."; exit 1; }
 
-ACTIVE_ENV="$(sui client active-env 2>/dev/null)"
-[[ "$ACTIVE_ENV" == "$NETWORK" ]] || { warn "ERROR: active Sui env is '$ACTIVE_ENV', expected '$NETWORK' (sui client switch --env $NETWORK)."; exit 1; }
+# ── Preflight (hard failures before anything is signed; same rules as access-gate-sui publish.sh) ──
+# The active env must be NETWORK; testnet/mainnet must report their chain identifier; the CLI
+# major.minor must match Published.toml `toolchain-version`; mainnet needs MAINNET_CONFIRM=1.
+preflight() {
+  local published_toml="$1" env chain want tool cli
+  env="$(sui client active-env 2>/dev/null || true)"
+  [ "$env" = "$NETWORK" ] || { echo "ERROR: active Sui env is '${env:-<none>}', expected '$NETWORK' (sui client switch --env $NETWORK)." >&2; exit 1; }
+  case "$NETWORK" in testnet) want=4c78adac ;; mainnet) want=35834a8a ;; *) want="" ;; esac
+  if [ -n "$want" ]; then
+    chain="$(sui client chain-identifier 2>/dev/null | awk '/^Hex:/{print $2; exit} !/:/{print $1; exit}')"
+    [ "$chain" = "$want" ] || { echo "ERROR: chain identifier is '${chain:-<unreachable>}', expected $want for $NETWORK." >&2; exit 1; }
+  fi
+  tool="$(awk -v s="[published.$NETWORK]" '$0==s{f=1;next} /^\[/{f=0} f && /^toolchain-version/{gsub(/.*= *"|".*/,"");print;exit}' "$published_toml" 2>/dev/null || true)"
+  cli="$(sui --version | awk '{print $2}' | cut -d- -f1)"
+  if [ -n "$tool" ] && [ "${cli%.*}" != "${tool%.*}" ]; then
+    echo "ERROR: sui CLI $cli does not match Published.toml toolchain-version $tool (major.minor)." >&2; exit 1
+  fi
+  if [ "$NETWORK" = "mainnet" ] && [ "${MAINNET_CONFIRM:-}" != "1" ]; then
+    echo "SKIPPED: mainnet — re-run with MAINNET_CONFIRM=1 to proceed." >&2; exit 78
+  fi
+}
+preflight "$(dirname "$0")/../Published.toml"
 ACTIVE_ADDRESS="$(sui client active-address 2>/dev/null)"
 
 # Long-form (64-hex) address, lower-case, for comparing on-chain type strings.
@@ -121,10 +141,20 @@ fi
 
 read -r -p "Transfer these objects to $MULTISIG_ADDRESS on $NETWORK? Type YES to confirm: " CONFIRM
 [[ "$CONFIRM" == "YES" ]] || { warn "Aborted."; exit 1; }
+if [[ -n "$INCLUDE_UPGRADE_CAP" ]]; then
+  # Moving upgrade authority is its own decision: the YES above does not cover it.
+  read -r -p "Also hand UpgradeCap ${ACCESS_GATE_UPGRADE_CAP_ID} to the multisig? Type UPGRADECAP to confirm: " CONFIRM_CAP
+  [[ "$CONFIRM_CAP" == "UPGRADECAP" ]] || { warn "Aborted (nothing sent)."; exit 1; }
+fi
 
 for i in "${!IDS[@]}"; do
-  sui client transfer --object-id "${IDS[$i]}" --to "$MULTISIG_ADDRESS" --gas-budget 10000000 >/dev/null
-  echo "OK    ${LABELS[$i]} transferred."
+  if ! OUT="$(sui client transfer --object-id "${IDS[$i]}" --to "$MULTISIG_ADDRESS" --gas-budget 10000000 --json 2>&1)"; then
+    warn "ERROR: transferring ${LABELS[$i]} failed:"; warn "$OUT"
+    warn "Recovery: the objects before it were sent; re-run with only the remaining ones still owned by $ACTIVE_ADDRESS"
+    warn "          (the script re-verifies ownership, so a re-run refuses anything already transferred)."
+    exit 1
+  fi
+  echo "OK    ${LABELS[$i]} transferred (tx $(jq -r '.digest // "?"' <<<"$(awk '/^{/,0' <<<"$OUT")"))."
 done
 echo ""
 echo "All transfers submitted. Verify ownership on-chain for $MULTISIG_ADDRESS ($NETWORK)."

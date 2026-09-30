@@ -6,17 +6,22 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Move tests
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install suiup
         run: |
-          curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | bash
+          curl -fsSLo /tmp/suiup.tgz "https://github.com/MystenLabs/suiup/releases/download/v0.0.14/suiup-Linux-musl-x86_64.tar.gz"
+          echo "c0b9fea95d52c4c5855478c3ee56e58e446614f32300dbd41fcc637a2e09878a  /tmp/suiup.tgz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin" && tar -xzf /tmp/suiup.tgz -C "$HOME/.local/bin" suiup
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Sui CLI (testnet channel)
@@ -29,3 +34,12 @@ jobs:
 
       - name: Build and test
         run: sui move test --build-env testnet
+
+  shellcheck:
+    name: shellcheck (ops scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # shellcheck is preinstalled on the GitHub-hosted Ubuntu runners.
+      - name: shellcheck
+        run: shellcheck -x -P SCRIPTDIR scripts/*.sh

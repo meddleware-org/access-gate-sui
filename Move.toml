@@ -1,7 +1,7 @@
 [package]
 edition = "2024"
 name = "access_gate"
-version = "0.0.2"
+version = "0.0.3"
 license = "0BSD"
 # No `published-at`: the testnet publication of this source is recorded in Published.toml
 # (Sui >= 1.80) — package 0x1a81ca17…eea4. Superseded: 0x0bedd0b2…d20d (pre-policy source; its

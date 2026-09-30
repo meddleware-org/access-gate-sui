@@ -12,6 +12,8 @@ client.yaml
 .env.testnet
 .env.mainnet
 Pub.*.toml
+# Previous deployment records kept by scripts/publish.sh
+.env.*.bak
 
 # macOS
 .DS_Store

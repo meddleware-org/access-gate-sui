@@ -86,6 +86,18 @@ git tag v0.0.2 && git push origin v0.0.2
 (The on-chain deployment is separate — `./scripts/publish.sh testnet` — and only needs redoing when
 the Move source changes.)
 
+## Operations runbook
+
+Every script refuses to sign unless the active `sui client` env **is** the target network (it
+never switches it), the chain identifier matches (testnet/mainnet), and the `sui` CLI major.minor
+matches `Published.toml`'s `toolchain-version`. Mainnet additionally needs `MAINNET_CONFIRM=1`
+(a skipped run exits `78`).
+
+| Script | Purpose | Dry run | Execute | Recovery |
+| --- | --- | --- | --- | --- |
+| `scripts/publish.sh <net> [--create-gate] [--make-immutable]` | Publish, optionally create the first gate and burn the UpgradeCap | — (publishing is the action; the UpgradeCap burn asks for its own `BURN <id prefix>` confirmation) | as shown | IDs are written to `.env.<net>` (the previous record is kept as `.env.<net>.<timestamp>.bak`). If gate creation fails, re-run only the gate PTB against the recorded package/config IDs — never re-publish. A declined burn keeps the UpgradeCap; burn later with `sui client call --package 0x2 --module package --function make_immutable --args <cap>` |
+| `scripts/transfer-platform-authority.sh` | Move `PlatformAdminCap`, `Publisher` and both `Display`s (plus the UpgradeCap with `--include-upgrade-cap`) to a multisig | `NETWORK=<net> MULTISIG_ADDRESS=0x… bash scripts/transfer-platform-authority.sh` (default) | `DRY_RUN=0 …` then `YES` (and `UPGRADECAP` for the cap) | Each object is re-verified (type, package, owner) before sending; after a partial failure, re-run — objects already transferred are refused, the rest proceed |
+
 ## Security & audit
 
 - [SECURITY.md](SECURITY.md) — scope, invariants, reporting.
