@@ -86,6 +86,15 @@
 /// `Display<SoulboundAccessNFT>` objects (created in `init`) map these to the Sui
 /// standard wallet display fields `name`, `image_url`, and `description`.
 ///
+/// ## Versioning (upgrade safety)
+///
+/// Old package versions stay callable on-chain forever. `PlatformConfig.version` names the one package
+/// version allowed to act: every function that changes shared state, mints or consumes takes the
+/// `PlatformConfig` and aborts with `E_WRONG_VERSION` from any other version. After an upgrade that
+/// bumps `VERSION`, the `PlatformAdminCap` holder calls `migrate`, and from then on only the new code
+/// works — a fix shipped in an upgrade cannot be bypassed by calling the old version. Read-only views
+/// (`is_valid_for`, `gate_*`) and a holder's `burn` stay ungated, so dependants and holders keep working.
+///
 /// ## Trust assumptions
 ///
 /// - `create_gate`, `create_free_gate`, `purchase`, and `consume` are permissionless. Anyone may
@@ -137,6 +146,14 @@ const E_FREEZE_WHILE_PAUSED: u64 = 10;
 const E_PRICE_TOO_LOW: u64 = 11;
 /// `set_price(0)` on a gate whose free-gate fee has not been paid (use `make_gate_free`).
 const E_FREE_FEE_UNPAID: u64 = 12;
+/// The call came from a package version other than the one `PlatformConfig.version` names. After an
+/// upgrade and `migrate`, every older version aborts here, so a fix cannot be bypassed.
+const E_WRONG_VERSION: u64 = 13;
+/// `migrate` was called when `PlatformConfig` is already at (or past) this package version.
+const E_NOT_UPGRADE: u64 = 14;
+
+/// This package version. Bump it in every upgrade that must retire older versions, then call `migrate`.
+const VERSION: u64 = 1;
 
 /// Minimum nonce length (bytes). Enforced by `consume_data`; ensures the server-issued
 /// challenge carries enough entropy to be meaningful as a replay guard.
@@ -148,6 +165,8 @@ const MIN_NONCE_LENGTH: u64 = 8;
 /// Created once in `init`; shared permanently. Updateable via `PlatformAdminCap`.
 public struct PlatformConfig has key {
     id: UID,
+    /// The package version allowed to use this config and every gate (see `migrate`).
+    version: u64,
     /// Address that receives the commission fraction from every paid `purchase`.
     treasury: address,
     /// Commission in basis points (20 = 0.2%). Applied to every paid `purchase`.
@@ -380,12 +399,43 @@ fun init(otw: ACCESS_GATE, ctx: &mut TxContext) {
     transfer::public_transfer(PlatformAdminCap { id: object::new(ctx) }, ctx.sender());
     transfer::share_object(PlatformConfig {
         id: object::new(ctx),
+        version: VERSION,
         treasury: ctx.sender(),
         commission_bps: DEFAULT_COMMISSION_BPS,
         min_commission_mist: DEFAULT_MIN_COMMISSION_MIST,
         free_gate_fee_mist: DEFAULT_FREE_GATE_FEE_MIST,
     });
 }
+
+// ── Versioning ──────────────────────────────────────────────────────────────────
+
+/// Emitted when `migrate` moves `PlatformConfig` to a new package version.
+public struct PlatformMigratedEvent has copy, drop {
+    from_version: u64,
+    to_version: u64,
+}
+
+/// Abort unless the caller is the package version `PlatformConfig` names. Every function that changes
+/// shared state, mints or consumes calls this; read-only views and holder burns do not.
+fun check_version(platform: &PlatformConfig) {
+    assert!(platform.version == VERSION, E_WRONG_VERSION);
+}
+
+/// Move `PlatformConfig` (and with it every gate) to this package version. Call it right after an
+/// upgrade that bumped `VERSION`; from then on only this version's functions work. `PlatformAdminCap`
+/// only, and never backwards (`E_NOT_UPGRADE`).
+public fun migrate(_cap: &PlatformAdminCap, config: &mut PlatformConfig) {
+    assert!(config.version < VERSION, E_NOT_UPGRADE);
+    let from_version = config.version;
+    config.version = VERSION;
+    event::emit(PlatformMigratedEvent { from_version, to_version: VERSION });
+}
+
+/// The package version `PlatformConfig` currently allows.
+public fun platform_version(platform: &PlatformConfig): u64 { platform.version }
+
+/// This package version (`VERSION`).
+public fun package_version(): u64 { VERSION }
 
 // ── Gate lifecycle ──────────────────────────────────────────────────────────────
 
@@ -431,6 +481,7 @@ public fun create_gate(
     policy: GatePolicy,
     ctx: &mut TxContext,
 ) {
+    check_version(platform);
     assert!(price_mist >= min_paid_price_mist(platform), E_PRICE_TOO_LOW);
     share_new_gate(
         price_mist, payment_recipient, default_uses, soulbound, auto_burn_at_zero,
@@ -454,6 +505,7 @@ public fun create_free_gate(
     policy: GatePolicy,
     ctx: &mut TxContext,
 ) {
+    check_version(platform);
     let fee = platform.free_gate_fee_mist;
     pay_to(payment, fee, platform.treasury, ctx);
     share_new_gate(
@@ -529,6 +581,7 @@ public fun purchase(
     mut payment: Coin<SUI>,
     ctx: &mut TxContext,
 ) {
+    check_version(platform);
     assert!(!gate.paused, E_PAUSED);
     assert!(payment.value() >= gate.price_mist, E_INSUFFICIENT_PAYMENT);
 
@@ -556,6 +609,7 @@ public fun airdrop(
     recipient: address,
     ctx: &mut TxContext,
 ) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     let commission = gate_commission_mist(gate, platform);
     pay_to(payment, commission, platform.treasury, ctx);
@@ -672,7 +726,14 @@ fun new_variant(default_uses: u64): AccessVariant {
 /// unlimited pass or zero uses, and with `E_PAUSED` while the gate is paused if its policy has
 /// `pause_blocks_access`.
 #[allow(lint(self_transfer))]
-public fun consume(mut nft: AccessNFT, gate: &Gate, nonce: vector<u8>, ctx: &mut TxContext) {
+public fun consume(
+    mut nft: AccessNFT,
+    gate: &Gate,
+    platform: &PlatformConfig,
+    nonce: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    check_version(platform);
     let nft_id = object::id(&nft);
     let ts = ctx.epoch_timestamp_ms();
     let burn = consume_data(&mut nft.data, gate, nonce, nft_id, ts, ctx.sender());
@@ -691,9 +752,11 @@ public fun consume(mut nft: AccessNFT, gate: &Gate, nonce: vector<u8>, ctx: &mut
 public fun consume_soulbound(
     mut nft: SoulboundAccessNFT,
     gate: &Gate,
+    platform: &PlatformConfig,
     nonce: vector<u8>,
     ctx: &mut TxContext,
 ) {
+    check_version(platform);
     let nft_id = object::id(&nft);
     let ts = ctx.epoch_timestamp_ms();
     let burn = consume_data(&mut nft.data, gate, nonce, nft_id, ts, ctx.sender());
@@ -801,6 +864,7 @@ public fun make_gate_immutable(
     platform: &PlatformConfig,
     ctx: &TxContext,
 ) {
+    check_version(platform);
     assert_admin_mutable(&cap, gate);
     if (gate.policy.freeze_requires_unpaused) assert!(!gate.paused, E_FREEZE_WHILE_PAUSED);
     if (gate.policy.lock_commission_on_freeze) {
@@ -820,6 +884,7 @@ public fun make_gate_immutable(
 /// `min_paid_price_mist(platform)` (`E_PRICE_TOO_LOW`); 0 is allowed only once the free-gate fee
 /// has been paid (`E_FREE_FEE_UNPAID` — use `make_gate_free`).
 public fun set_price(cap: &AdminCap, gate: &mut Gate, platform: &PlatformConfig, price_mist: u64) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     if (price_mist == 0) assert!(gate.free_fee_paid, E_FREE_FEE_UNPAID)
     else assert!(price_mist >= min_paid_price_mist(platform), E_PRICE_TOO_LOW);
@@ -835,6 +900,7 @@ public fun make_gate_free(
     payment: Coin<SUI>,
     ctx: &mut TxContext,
 ) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     let fee = if (gate.free_fee_paid) 0 else platform.free_gate_fee_mist;
     pay_to(payment, fee, platform.treasury, ctx);
@@ -848,25 +914,49 @@ public fun make_gate_free(
 }
 
 /// Redirect future purchase payments to a new recipient address.
-public fun set_payment_recipient(cap: &AdminCap, gate: &mut Gate, recipient: address) {
+public fun set_payment_recipient(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    recipient: address,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.payment_recipient = recipient;
 }
 
 /// Pause or unpause `purchase` (and, per the gate's policy, `consume` and dependent access).
-public fun set_paused(cap: &AdminCap, gate: &mut Gate, paused: bool) {
+public fun set_paused(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    paused: bool,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.paused = paused;
 }
 
 /// Change the default uses for future mints (does not affect already-minted NFTs).
-public fun set_default_uses(cap: &AdminCap, gate: &mut Gate, default_uses: u64) {
+public fun set_default_uses(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    default_uses: u64,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.default_uses = default_uses;
 }
 
 /// Switch the soulbound flag for future mints (does not affect already-minted NFTs).
-public fun set_soulbound(cap: &AdminCap, gate: &mut Gate, soulbound: bool) {
+public fun set_soulbound(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    soulbound: bool,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.soulbound = soulbound;
 }
@@ -874,25 +964,49 @@ public fun set_soulbound(cap: &AdminCap, gate: &mut Gate, soulbound: bool) {
 /// Toggle the auto-burn policy. The flag is read from the gate at `consume` time, so it
 /// applies to **every** single-use NFT of this gate — already-minted ones included — whose
 /// next consume reaches zero.
-public fun set_auto_burn_at_zero(cap: &AdminCap, gate: &mut Gate, auto_burn_at_zero: bool) {
+public fun set_auto_burn_at_zero(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    auto_burn_at_zero: bool,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.auto_burn_at_zero = auto_burn_at_zero;
 }
 
 /// Update the default NFT display name for future mints (does not affect existing NFTs).
-public fun set_nft_name(cap: &AdminCap, gate: &mut Gate, name: String) {
+public fun set_nft_name(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    name: String,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.nft_name = name;
 }
 
 /// Update the default NFT image URL for future mints (does not affect existing NFTs).
-public fun set_nft_image_url(cap: &AdminCap, gate: &mut Gate, url: String) {
+public fun set_nft_image_url(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    url: String,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.nft_image_url = url;
 }
 
 /// Update the default NFT description for future mints (does not affect existing NFTs).
-public fun set_nft_description(cap: &AdminCap, gate: &mut Gate, description: String) {
+public fun set_nft_description(
+    cap: &AdminCap,
+    gate: &mut Gate,
+    platform: &PlatformConfig,
+    description: String,
+) {
+    check_version(platform);
     assert_admin_mutable(cap, gate);
     gate.nft_description = description;
 }
@@ -905,6 +1019,7 @@ public fun set_platform_treasury(
     config: &mut PlatformConfig,
     treasury: address,
 ) {
+    check_version(config);
     assert!(treasury != @0x0, E_ZERO_ADDRESS);
     config.treasury = treasury;
     emit_platform_updated(config);
@@ -916,6 +1031,7 @@ public fun set_commission_bps(
     config: &mut PlatformConfig,
     commission_bps: u64,
 ) {
+    check_version(config);
     assert!(commission_bps <= MAX_COMMISSION_BPS, E_COMMISSION_TOO_HIGH);
     config.commission_bps = commission_bps;
     emit_platform_updated(config);
@@ -928,6 +1044,7 @@ public fun set_min_commission_mist(
     config: &mut PlatformConfig,
     min_commission_mist: u64,
 ) {
+    check_version(config);
     config.min_commission_mist = min_commission_mist;
     emit_platform_updated(config);
 }
@@ -938,6 +1055,7 @@ public fun set_free_gate_fee_mist(
     config: &mut PlatformConfig,
     free_gate_fee_mist: u64,
 ) {
+    check_version(config);
     config.free_gate_fee_mist = free_gate_fee_mist;
     emit_platform_updated(config);
 }
@@ -1112,11 +1230,19 @@ public fun share_platform_config_full_for_testing(
 ) {
     transfer::share_object(PlatformConfig {
         id: object::new(ctx),
+        version: VERSION,
         treasury,
         commission_bps,
         min_commission_mist,
         free_gate_fee_mist,
     });
+}
+
+#[test_only]
+/// Force `PlatformConfig.version` (simulates a config left at an older version, or one already
+/// migrated past this package, to exercise `check_version` and `migrate`).
+public fun set_platform_version_for_testing(config: &mut PlatformConfig, version: u64) {
+    config.version = version;
 }
 
 #[test_only]

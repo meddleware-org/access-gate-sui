@@ -54,15 +54,20 @@ treated as high severity:
 
 ## Versioning and immutability
 
-The intended policy is that each published version is **permanently immutable**: the `UpgradeCap`
-is burned via `scripts/publish.sh --make-immutable` (`0x2::package::make_immutable`), after which the
-package bytecode and module semantics can never change. **Current state:** the testnet package
-`0x1a81ca…` has a live `UpgradeCap` (`0xf04a1d87…32bc`, compatible policy, held by the publisher
-EOA) — burning it or moving it to a multisig is an operator requirement before launch in the audit
-(`docs/audit/access-gate-sui-audit.md`). The superseded `0x0bedd0…` and the stray test publishes are
-immutable (their caps were burned on 2026-09-28).
+Each full release follows [CUSTODY.md](CUSTODY.md): the package is published, its `UpgradeCap` moves
+to the custody multisig, and the multisig burns it (`0x2::package::make_immutable`) on a planned date
+after a verification window. From then on the package bytecode can never change. **Current state:** the
+testnet package `0x1a81ca…` has a live `UpgradeCap` (`0xf04a1d87…32bc`, compatible policy, held by the
+publisher EOA); it is superseded by the version-gated republish and its cap is burned then. The older
+`0x0bedd0…` and the stray test publishes are immutable (their caps were burned on 2026-09-28).
 
-**Future protocol changes ship as a new package at a new address.** The old version and all its
+**Version gating.** `PlatformConfig.version` names the only package version allowed to act: every
+function that changes shared state, mints or consumes aborts with `E_WRONG_VERSION` (13) under any other
+version. An upgrade during the verification window bumps `VERSION`, and the `PlatformAdminCap` holder
+calls `migrate` (forward only, `E_NOT_UPGRADE` = 14), which retires every older version at once — so a
+fixed defect cannot be reached through the old code. Views and holder `burn`s stay ungated.
+
+**After the burn, protocol changes ship as a new package at a new address.** The old version and all its
 gates, NFTs, and `PlatformConfig` remain valid forever. No one is forced to migrate.
 
 **For integrators and gateway operators:**
@@ -75,7 +80,7 @@ gates, NFTs, and `PlatformConfig` remain valid forever. No one is forced to migr
 - An NFT minted under v1 (`0x<v1_addr>::access_gate::AccessNFT`) cannot be consumed by a v2
   `consume` call. Route each consume transaction to the package version that minted the NFT.
 
-The `UpgradeCap` listed in the audit (while still live) is itself in scope for security reporting:
+The `UpgradeCap` (while it exists) and the custody multisig are themselves in scope for security reporting:
 compromise would give an attacker upgrade authority over all existing gates.
 
 ## Supported versions

@@ -8,11 +8,11 @@
 #   - Display<SoulboundAccessNFT>
 #   - UpgradeCap         — ONLY when --include-upgrade-cap is passed (see below)
 #
-# UpgradeCap custody (two options — pick ONE):
-#   * BURN it via `publish.sh --make-immutable` (package becomes permanently immutable), OR
-#   * TRANSFER it to the multisig with this script's `--include-upgrade-cap` flag (multisig retains
-#     upgrade authority under M-of-N control).
-#   By default this script does NOT touch the UpgradeCap.
+# UpgradeCap custody follows the release lifecycle in CUSTODY.md: publish, transfer the UpgradeCap
+# here with `--include-upgrade-cap`, launch, verify, then the multisig burns it on the planned date
+# with scripts/make-immutable.sh. By default this script does NOT touch the UpgradeCap.
+#
+# On testnet/mainnet the new owners are recorded in deployments.json `custody` (commit it).
 #
 # Safety:
 #   - Every object is re-read on-chain before transfer and must (a) have the exact expected type for
@@ -122,8 +122,8 @@ verify_object "${ACCESS_GATE_DISPLAY_SOULBOUND_NFT_ID:-}" "Display<SoulboundAcce
 IDS=("${ACCESS_GATE_PLATFORM_ADMIN_CAP_ID}" "${ACCESS_GATE_PUBLISHER_ID}" "${ACCESS_GATE_DISPLAY_ACCESS_NFT_ID}" "${ACCESS_GATE_DISPLAY_SOULBOUND_NFT_ID}")
 LABELS=("PlatformAdminCap" "Publisher" "Display<AccessNFT>" "Display<SoulboundAccessNFT>")
 if [[ -n "$INCLUDE_UPGRADE_CAP" ]]; then
-  echo "NOTE: transferring the UpgradeCap keeps the package upgradeable under multisig control."
-  echo "      The alternative is burning it via 'publish.sh --make-immutable'. Do NOT do both."
+  echo "NOTE: the package stays upgradeable under multisig control until the multisig burns the"
+  echo "      UpgradeCap with scripts/make-immutable.sh on the planned date (CUSTODY.md)."
   verify_object "${ACCESS_GATE_UPGRADE_CAP_ID:-}" "UpgradeCap" "${FW}::package::UpgradeCap" "$PKG_LONG"
   IDS+=("${ACCESS_GATE_UPGRADE_CAP_ID}")
   LABELS+=("UpgradeCap")
@@ -158,3 +158,11 @@ for i in "${!IDS[@]}"; do
 done
 echo ""
 echo "All transfers submitted. Verify ownership on-chain for $MULTISIG_ADDRESS ($NETWORK)."
+DEPLOYMENTS="$(dirname "$0")/../deployments.json"
+if [[ "$NETWORK" != "localnet" && -f "$DEPLOYMENTS" ]]; then
+  jq --arg n "$NETWORK" --arg ms "$MULTISIG_ADDRESS" --arg cap "$INCLUDE_UPGRADE_CAP" \
+    '.[$n].custody.multisigAddress = $ms
+     | if $cap == "1" then .[$n].custody.upgradeCapOwner = $ms else . end' \
+    "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp" && mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
+  echo "Recorded the multisig in deployments.json — set custody.plannedBurnDate and commit it."
+fi

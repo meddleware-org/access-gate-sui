@@ -51,7 +51,10 @@ fungible token or foreign NFT can never stand in for a pass). The source was the
 `0x1a81ca…`, and every stray and superseded `UpgradeCap` burned (**F31**).
 
 What remains is operational: custody of the new `UpgradeCap` and of platform authority (F2/F3 —
-an **operator requirement before launch**; burn vs multisig still to be chosen). The live Walrus
+an **operator requirement before launch**). The maintainer decided the process on 2026-10-01: both
+transfer and burn are supported, and each full release follows [CUSTODY.md](../../CUSTODY.md) — transfer to
+the multisig, verify during a planned window, then a multisig-signed burn — with version gating
+(`PlatformConfig.version`, `migrate`) so an upgrade in the window retires the old code. The live Walrus
 relay gate and the apps have moved to `0x1a81ca…` (released 2026-09-29).
 
 ---
@@ -74,7 +77,7 @@ relay gate and the apps have moved to `0x1a81ca…` (released 2026-09-29).
 
 | Object / type | Minted / created by | Holder / custodian | Authority it confers | Compromise / misuse impact | Immutability / rotation plan |
 | --- | --- | --- | --- | --- | --- |
-| `UpgradeCap` (`0x1ab9…4e89`, testnet) | publish | publisher EOA `0xa991…864a` | replace package code | arbitrary logic change for every gate, pass and payment | burn (`publish.sh --make-immutable`) or multisig (`transfer-platform-authority.sh --include-upgrade-cap`) — pre-mainnet blocking (F3) |
+| `UpgradeCap` (`0xf04a…32bc`, testnet) | publish | publisher EOA `0xa991…864a` | replace package code | arbitrary logic change for every gate, pass and payment | CUSTODY.md lifecycle: multisig (`transfer-platform-authority.sh --include-upgrade-cap`), then a multisig-signed burn (`make-immutable.sh`) on the planned date — pre-mainnet blocking (F3) |
 | `PlatformAdminCap` | `init` | publisher EOA | treasury + commission (≤ 10%) for all gates | redirect all commission; raise commission to 10% | multisig via `transfer-platform-authority.sh` — pre-mainnet blocking (F2) |
 | `Publisher` + `Display<AccessNFT>` + `Display<SoulboundAccessNFT>` | `init` (OTW) | publisher EOA | wallet-visible name/image/description templates for every NFT of both types | metadata spoofing / phishing images across all gates | multisig (same script) — pre-mainnet blocking (F2) |
 | `PlatformConfig` (shared) | `init` | shared; `treasury = publisher` | read by every `purchase` | — (mutable only via `PlatformAdminCap`) | per-package-version object |

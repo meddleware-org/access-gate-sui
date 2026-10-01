@@ -29,9 +29,9 @@ ID or NFT type across networks.
 
 ## UpgradeCap
 
-`publish.sh` records `ACCESS_GATE_UPGRADE_CAP_ID`. For a frozen, generic primitive consider
-`sui client call --package 0x2 --module package --function make_immutable` once stable
-(irreversible) — but keep it upgradeable while the ABI is still evolving.
+`publish.sh` records `ACCESS_GATE_UPGRADE_CAP_ID`. Custody follows [CUSTODY.md](CUSTODY.md): transfer to
+the multisig (`transfer-platform-authority.sh --include-upgrade-cap`), verify, then burn on the planned
+date (`make-immutable.sh`). An upgrade in the window bumps `VERSION` and calls `migrate`.
 
 ## Verification
 

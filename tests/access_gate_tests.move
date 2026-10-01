@@ -64,6 +64,34 @@ fun new_gate_full(
     ts::return_shared(platform);
 }
 
+// Helpers: the version-gated calls take the shared PlatformConfig; borrow it for the call.
+fun consume_t(s: &mut ts::Scenario, nft: AccessNFT, gate: &Gate, nonce: vector<u8>) {
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::consume(nft, gate, &platform, nonce, s.ctx());
+    ts::return_shared(platform);
+}
+
+fun consume_soulbound_t(s: &mut ts::Scenario, nft: SoulboundAccessNFT, gate: &Gate, nonce: vector<u8>) {
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::consume_soulbound(nft, gate, &platform, nonce, s.ctx());
+    ts::return_shared(platform);
+}
+
+fun set_paused_t(s: &mut ts::Scenario, cap: &AdminCap, gate: &mut Gate, v: bool) {
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_paused(cap, gate, &platform, v);
+    ts::return_shared(platform);
+}
+
+
+
+fun set_auto_burn_at_zero_t(s: &mut ts::Scenario, cap: &AdminCap, gate: &mut Gate, v: bool) {
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_auto_burn_at_zero(cap, gate, &platform, v);
+    ts::return_shared(platform);
+}
+
+
 // Helper: create a gate with the unrestricted default policy.
 fun new_gate(s: &mut ts::Scenario, price: u64, default_uses: u64, soulbound: bool, auto_burn: bool) {
     new_gate_full(s, price, default_uses, soulbound, auto_burn, access_gate::default_gate_policy());
@@ -222,7 +250,7 @@ fun test_purchase_paused_aborts() {
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
-    access_gate::set_paused(&cap, &mut gate, true);
+    set_paused_t(&mut s, &cap, &mut gate, true);
     s.return_to_sender(cap);
     ts::return_shared(gate);
 
@@ -253,7 +281,7 @@ fun test_single_use_consume_decrements_and_returns_receipt() {
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
     assert!(nft.uses_remaining() == option::some(3), 0);
-    access_gate::consume(nft, &gate, b"nonce-01", s.ctx());
+    consume_t(&mut s, nft, &gate, b"nonce-01");
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -280,7 +308,7 @@ fun test_single_use_auto_burn_at_zero_deletes() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"nonce-01", s.ctx());
+    consume_t(&mut s, nft, &gate, b"nonce-01");
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -305,7 +333,7 @@ fun test_single_use_no_auto_burn_keeps_zero_receipt() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"nonce-01", s.ctx());
+    consume_t(&mut s, nft, &gate, b"nonce-01");
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -332,7 +360,7 @@ fun test_consume_short_nonce_aborts() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"short", s.ctx()); // 5 bytes < MIN_NONCE_LENGTH -> abort E_INVALID_NONCE
+    consume_t(&mut s, nft, &gate, b"short"); // 5 bytes < MIN_NONCE_LENGTH -> abort E_INVALID_NONCE
     ts::return_shared(gate);
     s.end();
 }
@@ -354,7 +382,7 @@ fun test_consume_unlimited_pass_aborts() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"00000001", s.ctx()); // aborts E_NOT_SINGLE_USE
+    consume_t(&mut s, nft, &gate, b"00000001"); // aborts E_NOT_SINGLE_USE
     ts::return_shared(gate);
     s.end();
 }
@@ -376,13 +404,13 @@ fun test_consume_exhausted_aborts() {
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"00000001", s.ctx());
+    consume_t(&mut s, nft, &gate, b"00000001");
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"00000002", s.ctx()); // zero uses -> abort E_NO_USES_REMAINING
+    consume_t(&mut s, nft, &gate, b"00000002"); // zero uses -> abort E_NO_USES_REMAINING
     ts::return_shared(gate);
     s.end();
 }
@@ -408,7 +436,7 @@ fun test_soulbound_mint_and_consume() {
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<SoulboundAccessNFT>();
     assert!(nft.uses_remaining_soulbound() == option::some(2), 2);
-    access_gate::consume_soulbound(nft, &gate, b"nonce-sb", s.ctx());
+    consume_soulbound_t(&mut s, nft, &gate, b"nonce-sb");
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -439,7 +467,7 @@ fun test_consume_wrong_gate_aborts() {
     let nft = s.take_from_sender<AccessNFT>();
     // Take the OTHER gate (the newest shared one is gate B).
     let gate_b = s.take_shared<Gate>();
-    access_gate::consume(nft, &gate_b, b"00000001", s.ctx()); // NFT belongs to gate A -> abort E_WRONG_GATE
+    consume_t(&mut s, nft, &gate_b, b"00000001"); // NFT belongs to gate A -> abort E_WRONG_GATE
     ts::return_shared(gate_b);
     s.end();
 }
@@ -468,11 +496,14 @@ fun test_admin_setters() {
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
 
-    set_price(&mut s, &cap, &mut gate, 250);
-    access_gate::set_default_uses(&cap, &mut gate, 5);
-    access_gate::set_soulbound(&cap, &mut gate, true);
-    access_gate::set_auto_burn_at_zero(&cap, &mut gate, true);
-    access_gate::set_payment_recipient(&cap, &mut gate, BUYER);
+    // One borrow of the shared PlatformConfig per transaction (test_scenario rule).
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_price(&cap, &mut gate, &platform, 250);
+    access_gate::set_default_uses(&cap, &mut gate, &platform, 5);
+    access_gate::set_soulbound(&cap, &mut gate, &platform, true);
+    access_gate::set_auto_burn_at_zero(&cap, &mut gate, &platform, true);
+    access_gate::set_payment_recipient(&cap, &mut gate, &platform, BUYER);
+    ts::return_shared(platform);
 
     assert!(gate.gate_price_mist() == 250, 0);
     assert!(gate.gate_default_uses() == 5, 1);
@@ -761,7 +792,7 @@ fun test_consume_soulbound_unlimited_aborts() {
     buy_soulbound(&mut s, 0);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<SoulboundAccessNFT>();
-    access_gate::consume_soulbound(nft, &gate, b"00000001", s.ctx());
+    consume_soulbound_t(&mut s, nft, &gate, b"00000001");
     ts::return_shared(gate);
     s.end();
 }
@@ -773,12 +804,12 @@ fun test_consume_soulbound_exhausted_aborts() {
     buy_soulbound(&mut s, 1);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<SoulboundAccessNFT>();
-    access_gate::consume_soulbound(nft, &gate, b"00000001", s.ctx());
+    consume_soulbound_t(&mut s, nft, &gate, b"00000001");
     ts::return_shared(gate);
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<SoulboundAccessNFT>();
-    access_gate::consume_soulbound(nft, &gate, b"00000002", s.ctx());
+    consume_soulbound_t(&mut s, nft, &gate, b"00000002");
     ts::return_shared(gate);
     s.end();
 }
@@ -793,7 +824,7 @@ fun test_consume_soulbound_wrong_gate_aborts() {
     s.next_tx(BUYER);
     let nft = s.take_from_sender<SoulboundAccessNFT>();
     let gate_b = s.take_shared<Gate>();
-    access_gate::consume_soulbound(nft, &gate_b, b"00000001", s.ctx());
+    consume_soulbound_t(&mut s, nft, &gate_b, b"00000001");
     ts::return_shared(gate_b);
     s.end();
 }
@@ -805,7 +836,7 @@ fun test_consume_soulbound_short_nonce_aborts() {
     buy_soulbound(&mut s, 2);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<SoulboundAccessNFT>();
-    access_gate::consume_soulbound(nft, &gate, b"1234567", s.ctx()); // 7 bytes
+    consume_soulbound_t(&mut s, nft, &gate, b"1234567"); // 7 bytes
     ts::return_shared(gate);
     s.end();
 }
@@ -857,8 +888,10 @@ fun test_frozen_while_paused_gate_cannot_be_purchased() {
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
-    access_gate::set_paused(&cap, &mut gate, true);
-    freeze_gate(&mut s, cap, &mut gate);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_paused(&cap, &mut gate, &platform, true);
+    access_gate::make_gate_immutable(cap, &mut gate, &platform, s.ctx());
+    ts::return_shared(platform);
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
@@ -886,14 +919,14 @@ fun test_auto_burn_change_applies_to_existing_nfts() {
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
-    access_gate::set_auto_burn_at_zero(&cap, &mut gate, true); // turned ON after mint
+    set_auto_burn_at_zero_t(&mut s, &cap, &mut gate, true); // turned ON after mint
     s.return_to_sender(cap);
     ts::return_shared(gate);
 
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"00000001", s.ctx());
+    consume_t(&mut s, nft, &gate, b"00000001");
     ts::return_shared(gate);
     s.next_tx(BUYER);
     assert!(!s.has_most_recent_for_sender<AccessNFT>(), 0); // deleted, not kept as receipt
@@ -941,8 +974,10 @@ fun test_freeze_requires_unpaused_blocks_freezing_paused_gate() {
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
-    access_gate::set_paused(&cap, &mut gate, true);
-    freeze_gate(&mut s, cap, &mut gate);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_paused(&cap, &mut gate, &platform, true);
+    access_gate::make_gate_immutable(cap, &mut gate, &platform, s.ctx());
+    ts::return_shared(platform);
     ts::return_shared(gate);
     s.end();
 }
@@ -1269,14 +1304,14 @@ fun consume_while_paused(block: bool) {
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
-    access_gate::set_paused(&cap, &mut gate, true);
+    set_paused_t(&mut s, &cap, &mut gate, true);
     assert!(gate.gate_pause_blocks_access() == block, 0);
     s.return_to_sender(cap);
     ts::return_shared(gate);
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let nft = s.take_from_sender<AccessNFT>();
-    access_gate::consume(nft, &gate, b"00000001", s.ctx());
+    consume_t(&mut s, nft, &gate, b"00000001");
     ts::return_shared(gate);
     s.end();
 }
@@ -1334,5 +1369,386 @@ fun test_platform_fee_setters_update() {
     assert!(platform.platform_free_gate_fee_mist() == 7, 1);
     ts::return_shared(platform);
     access_gate::burn_platform_admin_cap_for_testing(admin);
+    s.end();
+}
+
+
+// ── Version gating (E_WRONG_VERSION = 13, E_NOT_UPGRADE = 14) ───────────────────
+
+// Helper: a paid 2-use gate (soulbound if `soulbound`), the buyer holding one NFT, then the shared
+// PlatformConfig moved to `version` — as if a newer package had migrated it, so this package's calls
+// must abort. Ends in a fresh CREATOR transaction.
+fun versioned_setup(s: &mut ts::Scenario, soulbound: bool, version: u64) {
+    setup_platform(s);
+    new_gate(s, 100, 2, soulbound, false);
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(100, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.next_tx(CREATOR);
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_platform_version_for_testing(&mut platform, version);
+    ts::return_shared(platform);
+    s.next_tx(CREATOR);
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_airdrop() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::airdrop(&cap, &gate, &platform, coin::mint_for_testing<SUI>(0, s.ctx()), BUYER, s.ctx());
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_price() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_price(&cap, &mut gate, &platform, 250);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_make_gate_free() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::make_gate_free(&cap, &mut gate, &platform, coin::mint_for_testing<SUI>(0, s.ctx()), s.ctx());
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_payment_recipient() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_payment_recipient(&cap, &mut gate, &platform, BUYER);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_paused() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_paused(&cap, &mut gate, &platform, true);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_default_uses() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_default_uses(&cap, &mut gate, &platform, 5);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_soulbound() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_soulbound(&cap, &mut gate, &platform, true);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_auto_burn_at_zero() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_auto_burn_at_zero(&cap, &mut gate, &platform, true);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_nft_name() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_nft_name(&cap, &mut gate, &platform, b"n".to_string());
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_nft_image_url() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_nft_image_url(&cap, &mut gate, &platform, b"https://x".to_string());
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_nft_description() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_nft_description(&cap, &mut gate, &platform, b"d".to_string());
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_make_gate_immutable() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::make_gate_immutable(cap, &mut gate, &platform, s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_create_gate() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::create_gate(
+        &platform, 100, PAYEE, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(), access_gate::default_gate_policy(), s.ctx(),
+    );
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_create_free_gate() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::create_free_gate(
+        &platform, coin::mint_for_testing<SUI>(0, s.ctx()), PAYEE, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(), access_gate::default_gate_policy(), s.ctx(),
+    );
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_purchase() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(100, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_consume() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let nft = s.take_from_sender<AccessNFT>();
+    consume_t(&mut s, nft, &gate, b"00000001");
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_consume_soulbound() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, true, 2);
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let nft = s.take_from_sender<SoulboundAccessNFT>();
+    consume_soulbound_t(&mut s, nft, &gate, b"00000001");
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_platform_treasury() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_platform_treasury(&cap, &mut platform, PAYEE);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_commission_bps() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_commission_bps(&cap, &mut platform, 10);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_min_commission_mist() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_min_commission_mist(&cap, &mut platform, 1);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 13)]
+fun test_wrong_version_blocks_set_free_gate_fee_mist() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2);
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_free_gate_fee_mist(&cap, &mut platform, 1);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+    s.end();
+}
+
+#[test]
+fun test_migrate_moves_an_older_config_forward() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 0); // a config left at an older version: this package's calls abort
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    assert!(platform.platform_version() == 0, 0);
+    access_gate::migrate(&cap, &mut platform);
+    assert!(platform.platform_version() == access_gate::package_version(), 1);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+
+    // After migrating, this version's calls work again.
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(100, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 14)]
+fun test_migrate_at_current_version_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::migrate(&cap, &mut platform); // already at this version
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 14)]
+fun test_migrate_never_moves_backwards() {
+    let mut s = ts::begin(CREATOR);
+    versioned_setup(&mut s, false, 2); // migrated past this package by a newer one
+    let cap = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::migrate(&cap, &mut platform);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(cap);
+    s.end();
+}
+
+#[test]
+fun test_init_and_test_configs_start_at_the_package_version() {
+    let mut s = ts::begin(CREATOR);
+    access_gate::init_for_testing(s.ctx());
+    s.next_tx(CREATOR);
+    let platform = s.take_shared<PlatformConfig>();
+    assert!(platform.platform_version() == access_gate::package_version(), 0);
+    assert!(access_gate::package_version() == 1, 1);
+    ts::return_shared(platform);
     s.end();
 }

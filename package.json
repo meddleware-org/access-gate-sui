@@ -34,7 +34,8 @@
     "docs/",
     "README.md",
     "SECURITY.md",
-    "LICENSE"
+    "LICENSE",
+    "CUSTODY.md"
   ],
   "engines": {
     "node": "^22.18.0 || >=24.12.0"

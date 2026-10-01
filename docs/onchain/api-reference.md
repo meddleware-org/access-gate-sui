@@ -22,7 +22,7 @@ Testnet package `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025e
 | `SoulboundAccessNFT` | `key` (no `store` ⇒ non-transferable) | same as `AccessNFT` |
 | `AccessData` | `store` | `gate_id: ID`, `variant: AccessVariant`, `minted_epoch: u64` |
 | `AccessVariant` | `copy, drop, store` enum | `UnlimitedPass` \| `SingleUse { uses_remaining: u64 }` |
-| `PlatformConfig` | `key` (shared) | `treasury: address`, `commission_bps: u64`, `min_commission_mist: u64`, `free_gate_fee_mist: u64` |
+| `PlatformConfig` | `key` (shared) | `version: u64` (the only package version allowed to act), `treasury: address`, `commission_bps: u64`, `min_commission_mist: u64`, `free_gate_fee_mist: u64` |
 | `PlatformAdminCap` | `key, store` | — |
 
 `init` (on publish) creates `Publisher`, `Display<AccessNFT>`, `Display<SoulboundAccessNFT>` and
@@ -51,20 +51,24 @@ commission_bps: 20, min_commission_mist: 1_000_000, free_gate_fee_mist: 100_000_
 | `create_free_gate(platform, payment: Coin<SUI>, payment_recipient, default_uses, soulbound, auto_burn_at_zero, nft_name, nft_image_url, nft_description, policy, ctx)` | anyone | Free gate (price 0). Pays `free_gate_fee_mist` from `payment` to the treasury (aborts 2 if short; excess refunded). |
 | `purchase(gate: &Gate, platform: &PlatformConfig, payment: Coin<SUI>, ctx)` | anyone | Aborts 1 if paused, 2 if underpaid. Commission (`gate_commission_mist`) → treasury; rest of the price → `payment_recipient`; overpayment refunded; mints to sender. |
 | `airdrop(cap: &AdminCap, gate: &Gate, platform: &PlatformConfig, payment: Coin<SUI>, recipient, ctx)` | `AdminCap` | Free for the recipient; the admin pays `gate_commission_mist` from `payment` (0 for a free gate; excess refunded). Aborts 5 on a foreign cap, 6 on a frozen gate, 2 if short. |
-| `consume(nft: AccessNFT, gate: &Gate, nonce: vector<u8>, ctx)` | NFT holder (by value) | Aborts 8 if `nonce` < 8 bytes, 5 if wrong gate, 1 if the gate is paused and its policy has `pause_blocks_access`, 3 on an unlimited pass, 4 at zero uses. Emits `AccessConsumedEvent`; deletes at zero if `auto_burn_at_zero` (read at consume time), else returns the NFT. |
-| `consume_soulbound(nft: SoulboundAccessNFT, gate, nonce, ctx)` | NFT holder (by value) | As `consume`. |
+| `consume(nft: AccessNFT, gate: &Gate, platform: &PlatformConfig, nonce: vector<u8>, ctx)` | NFT holder (by value) | Aborts 8 if `nonce` < 8 bytes, 5 if wrong gate, 1 if the gate is paused and its policy has `pause_blocks_access`, 3 on an unlimited pass, 4 at zero uses. Emits `AccessConsumedEvent`; deletes at zero if `auto_burn_at_zero` (read at consume time), else returns the NFT. |
+| `consume_soulbound(nft: SoulboundAccessNFT, gate, platform, nonce, ctx)` | NFT holder (by value) | As `consume`. |
 | `burn(nft: AccessNFT, ctx)` / `burn_soulbound(nft: SoulboundAccessNFT, ctx)` | NFT holder | Emits `AccessBurnedEvent`, deletes. |
 | `assert_admin(cap: &AdminCap, gate: &Gate)` | — | Aborts 5 unless `cap.gate_id == id(gate)`. |
 | `set_price(cap, gate: &mut Gate, platform: &PlatformConfig, price_mist)` | `AdminCap` | 0 requires `free_fee_paid` (else 12 — use `make_gate_free`); a paid price must be ≥ `min_paid_price_mist` (else 11). Aborts 5 / 6 as below. |
 | `make_gate_free(cap, gate: &mut Gate, platform, payment: Coin<SUI>, ctx)` | `AdminCap` | Pays `free_gate_fee_mist` unless already paid (excess refunded), sets the price to 0, emits `GateMadeFreeEvent`. |
-| `set_payment_recipient` / `set_paused` / `set_default_uses` / `set_soulbound` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` `(cap: &AdminCap, gate: &mut Gate, value)` | `AdminCap` | Abort 5 on a foreign cap, 6 on a frozen gate. No events. |
+| `set_payment_recipient` / `set_paused` / `set_default_uses` / `set_soulbound` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` `(cap: &AdminCap, gate: &mut Gate, platform: &PlatformConfig, value)` | `AdminCap` | Abort 5 on a foreign cap, 6 on a frozen gate. No events. |
 | `make_gate_immutable(cap: AdminCap, gate: &mut Gate, platform: &PlatformConfig, ctx)` | `AdminCap` (consumed) | Aborts 5 on a foreign cap, 10 if paused and the policy has `freeze_requires_unpaused`. With `lock_commission_on_freeze`, snapshots the platform terms into `locked_commission`. Sets `frozen`, emits `GateFrozenEvent`, deletes the cap. Irreversible. |
 | `set_platform_treasury(cap: &PlatformAdminCap, config, treasury)` | `PlatformAdminCap` | Aborts 9 on `@0x0`. |
 | `set_commission_bps(cap, config, bps)` | `PlatformAdminCap` | Aborts 7 above 1000 (10%). |
 | `set_min_commission_mist(cap, config, mist)` / `set_free_gate_fee_mist(cap, config, mist)` | `PlatformAdminCap` | Existing gates keep their price; their commission stays capped at 10% of it. |
+| `migrate(cap: &PlatformAdminCap, config: &mut PlatformConfig)` | `PlatformAdminCap` | After an upgrade that bumps `VERSION`, sets `config.version` to it (aborts 14 unless it moves forward) and emits `PlatformMigratedEvent { from_version, to_version }`. Every older version then aborts 13. |
+| `platform_version(platform)`, `package_version()` | — | The version `PlatformConfig` allows, and this package's `VERSION`. |
 | `commission_terms(platform)`, `effective_commission_terms(gate, platform)`, `gate_commission_mist(gate, platform)`, `commission_for_price(price, &terms)`, `min_paid_price_mist(platform)` | — | The commission maths above. |
 
 Every `PlatformConfig` setter emits `PlatformConfigUpdatedEvent` with the resulting configuration.
+Every state-changing, minting and consuming function takes `&PlatformConfig` and aborts 13 from any
+package version other than `PlatformConfig.version`.
 
 ### Views
 
@@ -128,10 +132,15 @@ Gate setters other than `make_gate_free` emit no events; read the current `Gate`
 | 10 | `E_FREEZE_WHILE_PAUSED` | `make_gate_immutable` on a paused gate whose policy has `freeze_requires_unpaused`. |
 | 11 | `E_PRICE_TOO_LOW` | A paid price below `min_paid_price_mist` (or 0 via `create_gate`). |
 | 12 | `E_FREE_FEE_UNPAID` | `set_price(0)` before the free-gate fee is paid. |
+| 13 | `E_WRONG_VERSION` | A state-changing, minting or consuming call from a package version other than `PlatformConfig.version` (an older version after `migrate`). |
+| 14 | `E_NOT_UPGRADE` | `migrate` when `PlatformConfig` is already at or past this package's `VERSION`. |
 
 Codes are unique within this module only — disambiguate by `(module, code)`.
 
 ## Invariants
+
+- Only the package version named by `PlatformConfig.version` can change shared state, mint or consume;
+  after an upgrade and `migrate`, older versions abort (`E_WRONG_VERSION`).
 
 - A pass for gate A can never be consumed, validated or approved against gate B.
 - A soulbound pass cannot leave the wallet it was minted to (no `store`).

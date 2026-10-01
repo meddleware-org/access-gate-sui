@@ -15,8 +15,10 @@
 #   --create-gate      After publishing, call access_gate::create_gate with the defaults below.
 #   --make-immutable   After publishing (and gate creation, if requested), burn the UpgradeCap
 #                      permanently via 0x2::package::make_immutable. IRREVERSIBLE. Prompts for
-#                      explicit "YES" confirmation. Not meaningful on localnet (test-publish
-#                      already creates an ephemeral immutable package).
+#                      a "BURN <id prefix>" confirmation. Only for packages that are never meant
+#                      to be upgraded (e.g. a throwaway test publish): a full release keeps the cap
+#                      and follows CUSTODY.md (transfer, verify, then scripts/make-immutable.sh).
+#                      Skipped on localnet (rehearse there with scripts/make-immutable.sh).
 #
 # Env for --create-gate (all optional; sensible defaults shown):
 #   GATE_PRICE_MIST        default 0        (free: pays the PlatformConfig free-gate fee from gas;
@@ -192,9 +194,15 @@ log "Wrote $ENV_FILE"
 if [ "$NETWORK" != "localnet" ]; then
     DEPLOYMENTS="$PKG_DIR/deployments.json"
     [ -f "$DEPLOYMENTS" ] || echo '{}' > "$DEPLOYMENTS"
-    jq --arg n "$NETWORK" --arg id "$PLATFORM_CONFIG_ID" '.[$n].platformConfigId = $id' "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
+    # A fresh publish resets the custody record (CUSTODY.md): the deploy key holds the new UpgradeCap
+    # and no burn is planned yet. A multisig chosen earlier is kept as the intended recipient.
+    jq --arg n "$NETWORK" --arg id "$PLATFORM_CONFIG_ID" --arg owner "$(sui client active-address)" \
+        '.[$n].platformConfigId = $id
+         | .[$n].custody = { multisigAddress: (.[$n].custody.multisigAddress // null),
+                             upgradeCapOwner: $owner, plannedBurnDate: null, burnedAt: null }' \
+        "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
     mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
-    log "Recorded platformConfigId in $DEPLOYMENTS — commit it with Published.toml."
+    log "Recorded platformConfigId and custody in $DEPLOYMENTS — commit it with Published.toml."
 fi
 log "Recovery: every ID above is in $ENV_FILE; if a later step fails, re-run only that step (e.g. the gate"
 log "          PTB below) against ACCESS_GATE_PACKAGE_ID / ACCESS_GATE_PLATFORM_CONFIG_ID — never re-publish."
@@ -254,7 +262,7 @@ fi
 
 if [ "$MAKE_IMMUTABLE" = "--make-immutable" ]; then
     if [ "$NETWORK" = "localnet" ]; then
-        log "NOTE: --make-immutable has no effect on localnet (test-publish already creates an ephemeral package). Skipping."
+        log "NOTE: --make-immutable is skipped on localnet; rehearse a burn with scripts/make-immutable.sh."
     else
         log "WARNING: About to burn UpgradeCap $UPGRADE_CAP_ID for package $PACKAGE_ID."
         log "         This is PERMANENTLY IRREVERSIBLE. The package can never be upgraded."
@@ -265,7 +273,11 @@ if [ "$MAKE_IMMUTABLE" = "--make-immutable" ]; then
             --package 0x2 --module package --function make_immutable \
             --args "$UPGRADE_CAP_ID"
         sed -i '/^ACCESS_GATE_UPGRADE_CAP_ID=/d' "$ENV_FILE"
-        log "Package $PACKAGE_ID is now permanently immutable. UpgradeCap removed from $ENV_FILE."
+        jq --arg n "$NETWORK" --arg d "$(date -u +%Y-%m-%d)" \
+            '.[$n].custody.upgradeCapOwner = null | .[$n].custody.burnedAt = $d' \
+            "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
+        mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
+        log "Package $PACKAGE_ID is now permanently immutable. UpgradeCap removed from $ENV_FILE; burn recorded in $DEPLOYMENTS."
     fi
 fi
 

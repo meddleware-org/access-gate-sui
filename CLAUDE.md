@@ -48,24 +48,32 @@ Consumers (a gateway, a frontend, a contract) compose on top.
 8. **The platform is always paid** — commission = `max(bps share, min_commission)` capped at 10%;
    paid price ≥ `min_paid_price_mist`; price 0 only after the free-gate fee; airdrops pay the
    commission.
+9. **Version gating** — `PlatformConfig.version` names the only package version allowed to act. Every
+   function that changes shared state, mints or consumes takes `&PlatformConfig` and calls
+   `check_version` (`E_WRONG_VERSION`); views and holder `burn`s do not. An upgrade bumps `VERSION`,
+   then the `PlatformAdminCap` holder calls `migrate` (forward only, `E_NOT_UPGRADE`), which retires
+   every older version at once. New gated functions must take `&PlatformConfig` and call
+   `check_version` first.
 
 ## Error codes
 
 `E_PAUSED=1`, `E_INSUFFICIENT_PAYMENT=2`, `E_NOT_SINGLE_USE=3`, `E_NO_USES_REMAINING=4`,
 `E_WRONG_GATE=5`, `E_GATE_FROZEN=6`, `E_COMMISSION_TOO_HIGH=7`, `E_INVALID_NONCE=8`,
-`E_ZERO_ADDRESS=9`, `E_FREEZE_WHILE_PAUSED=10`, `E_PRICE_TOO_LOW=11`, `E_FREE_FEE_UNPAID=12`.
+`E_ZERO_ADDRESS=9`, `E_FREEZE_WHILE_PAUSED=10`, `E_PRICE_TOO_LOW=11`, `E_FREE_FEE_UNPAID=12`,
+`E_WRONG_VERSION=13`, `E_NOT_UPGRADE=14`.
 Tests reference these by literal in `#[expected_failure(abort_code = …)]` because
 module-private constants are not cross-module referenceable in that attribute — keep the
 literal and the constant in sync if you renumber.
 
 ## Testing
 
-`sui move test --build-env testnet` — 60 tests (`tests/access_gate_tests.move`): `init` defaults,
+`sui move test --build-env testnet` — 85 tests (`tests/access_gate_tests.move`): `init` defaults,
 gate creation, purchase (exact/overpay/free/underpay/paused, commission split, u64::MAX price at
 the 10% cap, dust rounding), single-use decrement + receipt vs auto-burn, every abort code on both
 the transferable and soulbound paths, foreign-cap and frozen-gate guards, platform setters, voluntary
-burns, gate policies, the commission floor/cap, minimum price, free-gate fee paths and airdrop
-commission. Every abort code has an `expected_failure` test — keep it that way for new
+burns, gate policies, the commission floor/cap, minimum price, free-gate fee paths, airdrop
+commission, and version gating (every gated function aborts with `E_WRONG_VERSION` against another
+version; `migrate` moves forward only). Every abort code has an `expected_failure` test — keep it that way for new
 entries/branches.
 
 ## Working rules
