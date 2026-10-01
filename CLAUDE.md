@@ -73,8 +73,9 @@ entries/branches.
 - Keep it dependency-free (only Sui framework). Generality is the point.
 - New config → add a field to `Gate` + an `AdminCap`-gated setter + a `GateCreatedEvent`
   field + a view + tests.
-- If you touch the ABI (entry signatures, event fields), update the TS client
-  (`packages/nft-gate-client`) and the Rust gateway (`gateway/`) — they mirror this.
+- If you touch the ABI (entry signatures, event fields, abort codes), update the TS client
+  (`@meddleware/access-gate-client`: builders, BCS event layouts, `ACCESS_GATE_ABORTS`) and both
+  `nft-gate` gateways — they mirror this.
 
 ---
 

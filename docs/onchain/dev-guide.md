@@ -10,8 +10,12 @@ code see the [API reference](api-reference.md).
 
 Package (testnet): `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4`, `PlatformConfig`
 `0xe3b949cabe9a0574c03dfc924fb3f96e6f959f2bb86d053ed6229a241c3a23f7`.
-The TypeScript builders live in `@meddleware/nft-gate-client`; the examples below use
-`@mysten/sui` directly so the on-chain contract is explicit.
+The TypeScript client is `@meddleware/access-gate-client` (reads, events, builders, abort messages,
+and these ids per network in its `deployments` export); the examples below use `@mysten/sui`
+directly so the on-chain contract is explicit. `PKG` stands for both ids, which are equal until the
+package is upgraded: transactions call the **latest published-at** id, while types and events are
+matched at the **original id**. The gateway challenge/proof wire format is in
+`@meddleware/nft-gate-client`.
 
 ## Normative integration rules
 
@@ -61,7 +65,7 @@ tx.moveCall({
 //   arguments: [tx.object(PLATFORM_CONFIG_ID), fee, ...values, policy] })
 ```
 
-`@meddleware/nft-gate-client`'s `buildCreateGateTx(pkg, platformConfigId, { …, policy,
+`@meddleware/access-gate-client`'s `buildCreateGateTx(publishedAt, platformConfigId, { …, policy,
 freeGateFeeMist })` does this; read the terms with `fetchPlatformConfig`. Admin calls that depend on
 the platform terms — `set_price`, `make_gate_free`, `airdrop` (pays the commission) and
 `make_gate_immutable` — take the shared `PlatformConfig`; the client builders read it from

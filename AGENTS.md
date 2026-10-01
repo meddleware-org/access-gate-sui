@@ -42,6 +42,6 @@ sui client object <PACKAGE_ID> --json | jq -r '.data.owner'      # Immutable if 
 
 ## Working rules
 
-- ABI changes ripple to `packages/nft-gate-client` and `gateway/`. Update all three.
+- ABI changes ripple to `@meddleware/access-gate-client` and the `nft-gate` gateways. Update all of them.
 - No secrets in scripts; only public IDs/addresses are written to `.env.<network>`.
 - Generate tests with behaviour changes.
