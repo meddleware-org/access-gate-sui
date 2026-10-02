@@ -58,6 +58,6 @@ The platform operator sets these terms in `PlatformConfig`; see the
 - **Off-chain services** that accept passes are responsible for replay protection when they rely on
   single-use consumption — see the [developer guide](dev-guide.md).
 
-Deployed testnet package: `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4`
-(`PlatformConfig` `0xe3b949cabe9a0574c03dfc924fb3f96e6f959f2bb86d053ed6229a241c3a23f7`). The
-superseded `0x0bedd0…` still serves gates created on it. Mainnet: not yet published.
+Deployed testnet package: `0xa55789d77b8ae41e604c1c2e9ad9f7b034ca69b028ad0f1eee7d7cc8ad886d41`
+(`PlatformConfig` `0x53a325dc1ebd083c80fd5bed77e3e7cc989285283f188835793af3a7bd8504fa`). The
+superseded `0x1a81ca…` and `0x0bedd0…` packages keep working for gates created on them. Mainnet: not yet published.

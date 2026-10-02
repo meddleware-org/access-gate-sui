@@ -7,8 +7,8 @@ title: Access Gate — on-chain API reference
 Module `access_gate::access_gate` (`sources/access_gate.move`), Move 2024. All functions are
 `public` (callable from PTBs and other packages); there are no `entry`-only functions.
 
-Testnet package `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4`,
-`PlatformConfig` `0xe3b949cabe9a0574c03dfc924fb3f96e6f959f2bb86d053ed6229a241c3a23f7`.
+Testnet package `0xa55789d77b8ae41e604c1c2e9ad9f7b034ca69b028ad0f1eee7d7cc8ad886d41`,
+`PlatformConfig` `0x53a325dc1ebd083c80fd5bed77e3e7cc989285283f188835793af3a7bd8504fa`.
 
 ## Objects
 

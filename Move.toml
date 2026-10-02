@@ -1,12 +1,12 @@
 [package]
 edition = "2024"
 name = "access_gate"
-version = "0.0.3"
+version = "0.0.5"
 license = "0BSD"
 # No `published-at`: the testnet publication of this source is recorded in Published.toml
-# (Sui >= 1.80) — package 0x1a81ca17…eea4. Superseded: 0x0bedd0b2…d20d (pre-policy source; its
-# gates stay on it). Strays 0x692547ae…68bc and 0x891cc27c…985c
-# are unused test publishes whose UpgradeCaps were burned (see docs/audit, F14).
+# (Sui >= 1.80) — package 0xa55789d7…6d41 (version-gated, 2026-10-02). Superseded: 0x1a81ca17…eea4
+# (pre-version-gating) and 0x0bedd0b2…d20d (pre-policy source). Strays 0x692547ae…68bc and
+# 0x891cc27c…985c are unused test publishes whose UpgradeCaps were burned (see docs/audit, F14).
 
 [dependencies]
 

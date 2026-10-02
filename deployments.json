@@ -1,6 +1,6 @@
 {
   "testnet": {
-    "platformConfigId": "0xe3b949cabe9a0574c03dfc924fb3f96e6f959f2bb86d053ed6229a241c3a23f7",
+    "platformConfigId": "0x53a325dc1ebd083c80fd5bed77e3e7cc989285283f188835793af3a7bd8504fa",
     "custody": {
       "multisigAddress": null,
       "upgradeCapOwner": "0xa991ae11b0785718cd3ad1c616e804a4c083f431b3144bb845bdec651164864a",

@@ -75,16 +75,17 @@ package links against:
 
 ```toml
 [dependencies]
-# dcd2d3c records the testnet publication 0x1a81ca… (Published.toml), which the live consumers
-# and gates use. See docs/audit/access-gate-sui-audit.md for the address history.
-access_gate = { git = "https://github.com/meddleware-org/access-gate-sui.git", rev = "dcd2d3c2f918904950e8cb079d0c648fc79475f3" }
+# Pin the commit whose Published.toml records the publication you link against (seal-policies-sui's
+# Move.toml shows the current one). See docs/audit/access-gate-sui-audit.md for the address history.
+access_gate = { git = "https://github.com/meddleware-org/access-gate-sui.git", rev = "<full commit SHA>" }
 ```
 
-**Release = push a tag.** There is no registry publish step and no CI publish job: a version is
-consumable once its `v*` tag exists on GitHub. To cut a release, tag the commit and push it:
+**Release = push a tag.** Move consumers resolve the git commit directly; a `v*` tag also runs the
+`Publish (npm)` workflow, which ships `Published.toml` and `deployments.json` to
+`@meddleware/access-gate-sui` for the TypeScript client (trusted publishing). Bump `package.json`, then:
 
 ```bash
-git tag v0.0.2 && git push origin v0.0.2
+git tag v0.0.5 && git push origin v0.0.5
 ```
 
 (The on-chain deployment is separate — `./scripts/publish.sh testnet` — and only needs redoing when
