@@ -26,8 +26,8 @@ jobs:
 
       - name: Install Sui CLI (testnet channel)
         run: |
-          suiup install sui@testnet-v1.80.0
-          suiup switch sui@testnet-v1.80.0
+          suiup install sui@testnet-v1.81.0
+          suiup switch sui@testnet-v1.81.0
 
       - name: Verify Sui version
         run: sui --version
