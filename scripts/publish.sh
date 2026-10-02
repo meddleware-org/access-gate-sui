@@ -13,6 +13,8 @@
 #
 # Flags (order-independent after the network argument):
 #   --create-gate      After publishing, call access_gate::create_gate with the defaults below.
+#   --replace-published  Fresh republish over an existing Published.toml entry for <network> (the old
+#                      entry is backed up and removed; every ID changes).
 #   --make-immutable   After publishing (and gate creation, if requested), burn the UpgradeCap
 #                      permanently via 0x2::package::make_immutable. IRREVERSIBLE. Prompts for
 #                      a "BURN <id prefix>" confirmation. Only for packages that are never meant
@@ -55,7 +57,7 @@ PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Require explicit network argument.
 if [ -z "${1:-}" ]; then
     log "ERROR: network argument required."
-    log "Usage: ./scripts/publish.sh <localnet|testnet|mainnet> [--create-gate] [--make-immutable]"
+    log "Usage: ./scripts/publish.sh <localnet|testnet|mainnet> [--create-gate] [--make-immutable] [--replace-published]"
     exit 1
 fi
 NETWORK="$1"
@@ -65,10 +67,12 @@ case "$NETWORK" in
 esac
 CREATE_GATE=""
 MAKE_IMMUTABLE=""
+REPLACE_PUBLISHED=""
 for _arg in "${@:2}"; do
     case "$_arg" in
         --create-gate)    CREATE_GATE="--create-gate" ;;
         --make-immutable) MAKE_IMMUTABLE="--make-immutable" ;;
+        --replace-published) REPLACE_PUBLISHED="1" ;;
         *) log "ERROR: unknown flag '${_arg}' (a typo must not silently skip --make-immutable)."; exit 1 ;;
     esac
 done
@@ -127,6 +131,20 @@ ACTIVE_RPC=$(sui client envs --json 2>/dev/null \
     | jq -r ".[0][] | select(.alias==\"${NETWORK}\") | .rpc" 2>/dev/null || echo "unknown")
 log "RPC endpoint: ${ACTIVE_RPC}"
 
+# A network with a Published.toml entry is already published; `sui client publish` refuses until the
+# entry is removed. --replace-published makes a deliberate fresh republish: the old entry is kept in a
+# gitignored Published.toml.<timestamp>.bak and removed (git history also keeps it).
+if [ "$NETWORK" != "localnet" ] && grep -qx "\[published.${NETWORK}\]" "$PKG_DIR/Published.toml" 2>/dev/null; then
+    if [ "$REPLACE_PUBLISHED" != "1" ]; then
+        log "ERROR: Published.toml already records a ${NETWORK} publication. Upgrade it, or re-run with"
+        log "       --replace-published for a deliberate fresh publish (new package and object IDs)."
+        exit 1
+    fi
+    cp "$PKG_DIR/Published.toml" "$PKG_DIR/Published.toml.$(date -u +%Y%m%dT%H%M%SZ).bak"
+    awk -v s="[published.${NETWORK}]" '$0==s{skip=1;next} /^\[/{skip=0} !skip' "$PKG_DIR/Published.toml" > "$PKG_DIR/Published.toml.tmp"
+    mv "$PKG_DIR/Published.toml.tmp" "$PKG_DIR/Published.toml"
+    log "Removed the previous ${NETWORK} entry from Published.toml (backup kept)."
+fi
 log "Publishing access_gate to ${NETWORK} ..."
 
 # Use test-publish for localnet (Move.toml doesn't define localnet env).
