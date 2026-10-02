@@ -39,7 +39,9 @@
 #   - the ACTIVE `sui client` env must already be <network> (the script never switches it —
 #     run `sui client switch --env <network>` yourself);
 #   - testnet/mainnet: the chain identifier must match the network;
-#   - the `sui` CLI major.minor must match Published.toml `toolchain-version` (patch drift warns);
+#   - the `sui` CLI major.minor must match Published.toml `toolchain-version` (patch drift warns;
+#     ALLOW_TOOLCHAIN_CHANGE=1 permits a deliberate move to a new toolchain, which the fresh
+#     publish then records);
 #   - mainnet additionally requires MAINNET_CONFIRM=1.
 # An existing .env.<network> is kept as .env.<network>.<timestamp>.bak, never overwritten.
 # -----------------------------------------------------------------------------
@@ -102,9 +104,13 @@ fi
 WANT_TOOL=$(toolchain_version "$NETWORK")
 CLI_VER=$(sui --version | awk '{print $2}' | cut -d- -f1)
 if [ -n "$WANT_TOOL" ]; then
-    if [ "${CLI_VER%.*}" != "${WANT_TOOL%.*}" ]; then
+    if [ "${CLI_VER%.*}" != "${WANT_TOOL%.*}" ] && [ "${ALLOW_TOOLCHAIN_CHANGE:-}" = "1" ]; then
+        log "WARNING: publishing with sui CLI ${CLI_VER} instead of the recorded ${WANT_TOOL} (ALLOW_TOOLCHAIN_CHANGE=1)."
+        log "         This is a fresh publish: Published.toml records the new toolchain-version."
+    elif [ "${CLI_VER%.*}" != "${WANT_TOOL%.*}" ]; then
         log "ERROR: sui CLI ${CLI_VER} does not match Published.toml toolchain-version ${WANT_TOOL} (major.minor)."
         log "       Install it with: suiup install sui@testnet-v${WANT_TOOL} && suiup switch sui@testnet-v${WANT_TOOL}"
+        log "       or, for a deliberate move to a new toolchain, re-run with ALLOW_TOOLCHAIN_CHANGE=1."
         exit 1
     elif [ "$CLI_VER" != "$WANT_TOOL" ]; then
         log "WARNING: sui CLI ${CLI_VER} differs from toolchain-version ${WANT_TOOL} at patch level."
