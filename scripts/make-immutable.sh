@@ -48,8 +48,15 @@ published_field() {
 # Record a completed burn in deployments.json (localnet has no record). Published.toml is written by
 # Sui and is left untouched; its upgrade-capability then names a consumed object.
 record_burn() {
-  local deployments="$REPO_ROOT/deployments.json"
+  local deployments="$REPO_ROOT/deployments.json" recorded
   [ "$NETWORK" != "localnet" ] && [ -f "$deployments" ] || return 0
+  # deployments.json describes the current publication only: a superseded package's cap (passed as
+  # UPGRADE_CAP_ID) leaves it untouched.
+  recorded="$(published_field upgrade-capability 2>/dev/null || true)"
+  if [ "$(long_addr "${recorded:-0x0}")" != "$(long_addr "$UPGRADE_CAP_ID")" ]; then
+    log "Not the current publication's UpgradeCap — deployments.json left unchanged."
+    return 0
+  fi
   jq --arg n "$NETWORK" --arg d "$(date -u +%Y-%m-%d)" \
     '.[$n].custody.upgradeCapOwner = null | .[$n].custody.burnedAt = $d | .[$n].custody.plannedBurnDate = null' \
     "$deployments" > "$deployments.tmp" && mv "$deployments.tmp" "$deployments"

@@ -60,7 +60,7 @@ to the custody multisig, and the multisig burns it (`0x2::package::make_immutabl
 after a verification window. From then on the package bytecode can never change. **Current state:** the
 testnet package `0xa55789…` (version-gated, 2026-10-02) has a live `UpgradeCap` (`0x70be984f…e0ba`,
 held by the publisher EOA) until the mainnet custody process is exercised; `deployments.json` records
-it. The superseded `0x1a81ca…` has its cap burned once consumers have moved. The older
+it. The superseded `0x1a81ca…` is immutable (its cap `0xf04a1d87…32bc` was burned on 2026-10-02). The older
 `0x0bedd0…` and the stray test publishes are immutable (their caps were burned on 2026-09-28).
 
 **Version gating.** `PlatformConfig.version` names the only package version allowed to act: every
