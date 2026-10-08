@@ -57,7 +57,7 @@ commission_bps: 20, min_commission_mist: 1_000_000, free_gate_fee_mist: 100_000_
 | `assert_admin(cap: &AdminCap, gate: &Gate)` | — | Aborts 5 unless `cap.gate_id == id(gate)`. |
 | `set_price(cap, gate: &mut Gate, platform: &PlatformConfig, price_mist)` | `AdminCap` | 0 requires `free_fee_paid` (else 12 — use `make_gate_free`); a paid price must be ≥ `min_paid_price_mist` (else 11). Aborts 5 / 6 as below. |
 | `make_gate_free(cap, gate: &mut Gate, platform, payment: Coin<SUI>, ctx)` | `AdminCap` | Pays `free_gate_fee_mist` unless already paid (excess refunded), sets the price to 0, emits `GateMadeFreeEvent`. |
-| `set_payment_recipient` / `set_paused` / `set_default_uses` / `set_soulbound` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` `(cap: &AdminCap, gate: &mut Gate, platform: &PlatformConfig, value)` | `AdminCap` | Abort 5 on a foreign cap, 6 on a frozen gate. No events. |
+| `set_payment_recipient` / `set_paused` / `set_default_uses` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` `(cap: &AdminCap, gate: &mut Gate, platform: &PlatformConfig, value)` | `AdminCap` | Abort 5 on a foreign cap, 6 on a frozen gate, 16 if `set_default_uses` would switch between unlimited (0) and single-use (N > 0). `soulbound` is fixed at creation (no setter). No events. |
 | `make_gate_immutable(cap: AdminCap, gate: &mut Gate, platform: &PlatformConfig, ctx)` | `AdminCap` (consumed) | Aborts 5 on a foreign cap, 10 if paused and the policy has `freeze_requires_unpaused`. With `lock_commission_on_freeze`, snapshots the platform terms into `locked_commission`. Sets `frozen`, emits `GateFrozenEvent`, deletes the cap. Irreversible. |
 | `set_platform_treasury(cap: &PlatformAdminCap, config, treasury)` | `PlatformAdminCap` | Aborts 9 on `@0x0`. |
 | `set_commission_bps(cap, config, bps)` | `PlatformAdminCap` | Aborts 7 above 1000 (10%). |
@@ -108,7 +108,7 @@ All events have `copy, drop`. Timestamps are `ctx.epoch_timestamp_ms()` (epoch s
 | --- | --- | --- |
 | `GateCreatedEvent` | `create_gate`, `create_free_gate` | `gate_id`, `admin_cap_id`, `price_mist`, `default_uses`, `soulbound`, `auto_burn_at_zero`, `nft_name`, `policy`, `free_gate_fee_paid_mist` (0 for a paid gate), `creator`, `timestamp_ms` |
 | `AccessMintedEvent` | `purchase`, `airdrop` | `nft_id`, `gate_id`, `soulbound`, `initial_uses` (0 = unlimited), `recipient`, `commission_mist`, `timestamp_ms` |
-| `AccessConsumedEvent` | `consume*` | `nft_id`, `gate_id`, `nonce`, `consumer` (tx sender), `uses_after`, `timestamp_ms` — verifiers MUST check `nonce`, `gate_id`, `consumer` |
+| `AccessConsumedEvent` | `consume*` | `nft_id`, `gate_id`, `nonce`, `consumer` (tx sender), `uses_after`, `timestamp_ms` — verifiers bind a grant to the transaction digest and check the event type, `gate_id` and `consumer` (the sender); `nonce` is optional (see the dev guide) |
 | `AccessBurnedEvent` | auto-burn in `consume*`, `burn*` | `nft_id`, `gate_id`, `timestamp_ms` — emitted before the object is deleted |
 | `GateFrozenEvent` | `make_gate_immutable` | `gate_id`, `locked_commission` (`Option<CommissionTerms>`; `none` = follows the live terms), `timestamp_ms` |
 | `GateMadeFreeEvent` | `make_gate_free` | `gate_id`, `fee_paid_mist` (0 if already paid), `timestamp_ms` |
@@ -134,6 +134,8 @@ Gate setters other than `make_gate_free` emit no events; read the current `Gate`
 | 12 | `E_FREE_FEE_UNPAID` | `set_price(0)` before the free-gate fee is paid. |
 | 13 | `E_WRONG_VERSION` | A state-changing, minting or consuming call from a package version other than `PlatformConfig.version` (an older version after `migrate`). |
 | 14 | `E_NOT_UPGRADE` | `migrate` when `PlatformConfig` is already at or past this package's `VERSION`. |
+| 15 | `E_POLICY_COMBINATION` | `new_gate_policy` with `pause_blocks_decryption` or `pause_blocks_access` but not `freeze_requires_unpaused`: the gate could be paused and frozen for good. |
+| 16 | `E_USES_KIND_IMMUTABLE` | `set_default_uses` tried to switch between unlimited passes (0) and single-use passes (N > 0). |
 
 Codes are unique within this module only — disambiguate by `(module, code)`.
 

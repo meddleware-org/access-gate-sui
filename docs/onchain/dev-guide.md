@@ -26,20 +26,28 @@ These are requirements, not suggestions. They mirror the package audit's normati
    Never design a flow where a third party is expected to spend a user's pass.
 2. **A consumption is replay-proof only when the verifier enforces it.** The chain checks that the
    nonce is at least 8 bytes and records `consumer = tx sender`; it does **not** enforce nonce
-   uniqueness or freshness. A verifier that grants access based on `AccessConsumedEvent` MUST:
-   - issue a random, single-use nonce (≥ 16 bytes recommended) with a short expiry;
-   - accept a consumption only if its event carries **that** nonce, the expected `gate_id`, an
-     `nft_id` of that gate, and `consumer` equal to the address that signed the access proof;
-   - bind the grant to the consume **transaction digest** and accept each digest and each nonce
-     **once**;
-   - read the event from a finalised transaction (checkpointed), not from a client-supplied payload.
+   uniqueness or freshness. A verifier that grants access based on `AccessConsumedEvent` MUST use the
+   **digest-first** binding (what both reference gateways implement):
+   - read the consume transaction by its **digest** from a finalised (checkpointed) transaction, never from a
+     client-supplied payload;
+   - accept it only if it holds the exact event type `<originalId>::access_gate::AccessConsumedEvent`, the
+     transaction sender (the event's `consumer`) equals the address that signed the access proof, and
+     `gate_id` equals the gate being accessed;
+   - have the signed access message name the verifier's own audience and the digest, so a signature cannot
+     be replayed at another verifier or for another consumption;
+   - redeem each digest **once** (a lease, then commit or release in a redemption store), and bound the age
+     of an accepted consumption to the full node's retention window.
+
+   The event `nonce` is carried for a verifier that also issues challenges and may match it; the digest-first
+   protocol does not depend on it (which lets an interrupted upload resume with a fresh challenge).
 3. **Verify the pass against the gate on-chain.** Use `is_valid_for` / `is_valid_for_soulbound`
    (or compare `AccessData.gate_id`) — never trust a client's claim about which gate a pass belongs
    to.
 4. **Handle both NFT types.** A gate mints either `AccessNFT` or `SoulboundAccessNFT` (see
    `gate_is_soulbound`); call the matching function variant.
-5. **Route to the package that minted the pass.** A pass of package `0xA…` can only be consumed by
-   `0xA…::access_gate::consume`. Subscribe to events from every package address you trust.
+5. **Route to the package that minted the pass.** Within one upgrade lineage, always call the latest
+   `published-at` (older versions abort after `migrate`). A pass of a *different* package (another original
+   id) can only be consumed by that package's `consume`: subscribe to events of every original id you trust.
 
 ## Creating a gate (PTB)
 
@@ -94,9 +102,12 @@ coin is worth less than `gate_price_mist`.
 const tx = new Transaction()
 tx.moveCall({
   target: `${PKG}::access_gate::${soulbound ? 'consume_soulbound' : 'consume'}`,
-  arguments: [tx.object(NFT_ID), tx.object(GATE_ID), tx.pure.vector('u8', nonceBytes)],
+  arguments: [tx.object(NFT_ID), tx.object(GATE_ID), tx.object(PLATFORM_CONFIG_ID), tx.pure.vector('u8', nonceBytes)],
 })
 ```
+
+`PKG` must be the latest `published-at` (take it from `@meddleware/access-gate-client`'s `deployments`; an
+older one aborts `E_WRONG_VERSION` after a migrate), and `nonceBytes` at least 8 bytes.
 
 The transaction emits `AccessConsumedEvent { nft_id, gate_id, nonce, consumer, uses_after,
 timestamp_ms }`. If `uses_after == 0` and the gate has `auto_burn_at_zero`, the NFT is deleted and an

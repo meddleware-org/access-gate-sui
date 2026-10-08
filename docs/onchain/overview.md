@@ -25,7 +25,7 @@ particular consumer.
 
 - **Unlimited pass** (`default_uses = 0`) — valid for as long as it is held.
 - **Single-use pass** (`default_uses = N`) — carries `N` uses; each use is spent on-chain by the
-  holder calling `consume`, which records a one-time `nonce` supplied by the service being accessed.
+  holder calling `consume`, which records a `nonce` (and the transaction digest identifies the spend) so the service being accessed can bind one grant to one use.
 
 ## Money flow
 

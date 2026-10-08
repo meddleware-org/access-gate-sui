@@ -44,6 +44,9 @@
 #   - the `sui` CLI major.minor must match Published.toml `toolchain-version` (patch drift warns;
 #     ALLOW_TOOLCHAIN_CHANGE=1 permits a deliberate move to a new toolchain, which the fresh
 #     publish then records);
+#   - EXPECTED_SIGNER (0x… address), when set, must equal the active address; mainnet requires it,
+#     so a wrong active key cannot publish and become the UpgradeCap owner;
+#   - the active address must hold at least GAS_BUDGET MIST (a gas coin or the address balance);
 #   - mainnet additionally requires MAINNET_CONFIRM=1.
 # An existing .env.<network> is kept as .env.<network>.<timestamp>.bak, never overwritten.
 # -----------------------------------------------------------------------------
@@ -124,7 +127,20 @@ if [ "$NETWORK" = "mainnet" ] && [ "${MAINNET_CONFIRM:-}" != "1" ]; then
     log "SKIPPED: mainnet publishes real assets; re-run with MAINNET_CONFIRM=1 to proceed."
     exit 78
 fi
-log "Preflight OK: env=${NETWORK} chain=${CHAIN:-n/a} cli=${CLI_VER} signer=$(sui client active-address)"
+SIGNER="$(sui client active-address)"
+norm_addr() { local h="${1#0x}"; printf '0x%064s' "${h,,}" | tr ' ' 0; }
+if [ -n "${EXPECTED_SIGNER:-}" ]; then
+    [[ "$EXPECTED_SIGNER" =~ ^0x[0-9a-fA-F]{1,64}$ ]] || { log "ERROR: EXPECTED_SIGNER must be a 0x-prefixed address."; exit 1; }
+    [ "$(norm_addr "$EXPECTED_SIGNER")" = "$(norm_addr "$SIGNER")" ] \
+        || { log "ERROR: the active address ${SIGNER} is not EXPECTED_SIGNER ${EXPECTED_SIGNER}."; exit 1; }
+elif [ "$NETWORK" = "mainnet" ]; then
+    log "ERROR: mainnet requires EXPECTED_SIGNER (the address that must hold the deploy key)."; exit 1
+fi
+# Enough gas for the budget, before anything is signed.
+BALANCE=$(sui client gas --json 2>/dev/null | jq -r '([.gasCoins[]?.mistBalance] | add // 0) + (.addressMistBalance // 0)')
+[[ "$BALANCE" =~ ^[0-9]+$ ]] || { log "ERROR: could not read the gas balance of ${SIGNER}."; exit 1; }
+[ "$BALANCE" -ge "$GAS_BUDGET" ] || { log "ERROR: ${SIGNER} holds ${BALANCE} MIST, less than GAS_BUDGET=${GAS_BUDGET}."; exit 1; }
+log "Preflight OK: env=${NETWORK} chain=${CHAIN:-n/a} cli=${CLI_VER} signer=${SIGNER} balance=${BALANCE} MIST"
 
 # Print active RPC endpoint for confirmation.
 ACTIVE_RPC=$(sui client envs --json 2>/dev/null \
@@ -220,8 +236,14 @@ if [ "$NETWORK" != "localnet" ]; then
     [ -f "$DEPLOYMENTS" ] || echo '{}' > "$DEPLOYMENTS"
     # A fresh publish resets the custody record (CUSTODY.md): the deploy key holds the new UpgradeCap
     # and no burn is planned yet. A multisig chosen earlier is kept as the intended recipient.
+    # The authority object ids are public; recording them here (not only in the git-ignored .env) means a lost
+    # workstation does not turn the custody handoff into object discovery by type.
     jq --arg n "$NETWORK" --arg id "$PLATFORM_CONFIG_ID" --arg owner "$(sui client active-address)" \
+        --arg pac "$PLATFORM_ADMIN_CAP_ID" --arg pub "$PUBLISHER_ID" --arg dA "$DISPLAY_ACCESS_NFT_ID" \
+        --arg dS "$DISPLAY_SOULBOUND_NFT_ID" --arg uc "$UPGRADE_CAP_ID" \
         '.[$n].platformConfigId = $id
+         | .[$n].authorityObjects = { platformAdminCap: $pac, publisher: $pub, displayAccessNft: $dA,
+                                      displaySoulboundNft: $dS, upgradeCap: $uc }
          | .[$n].custody = { multisigAddress: (.[$n].custody.multisigAddress // null),
                              upgradeCapOwner: $owner, plannedBurnDate: null, burnedAt: null }' \
         "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
@@ -296,9 +318,13 @@ if [ "$MAKE_IMMUTABLE" = "--make-immutable" ]; then
         sui client call --json --gas-budget "$GAS_BUDGET" \
             --package 0x2 --module package --function make_immutable \
             --args "$UPGRADE_CAP_ID"
+        # Verify the burn before recording it: the UpgradeCap must be gone (consumed), not just "the call returned".
+        if sui client object "$UPGRADE_CAP_ID" --json >/dev/null 2>&1; then
+            log "ERROR: UpgradeCap $UPGRADE_CAP_ID still exists after make_immutable; not recording a burn."; exit 1
+        fi
         sed -i '/^ACCESS_GATE_UPGRADE_CAP_ID=/d' "$ENV_FILE"
         jq --arg n "$NETWORK" --arg d "$(date -u +%Y-%m-%d)" \
-            '.[$n].custody.upgradeCapOwner = null | .[$n].custody.burnedAt = $d' \
+            '.[$n].custody.upgradeCapOwner = null | .[$n].custody.burnedAt = $d | .[$n].authorityObjects.upgradeCap = null' \
             "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
         mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
         log "Package $PACKAGE_ID is now permanently immutable. UpgradeCap removed from $ENV_FILE; burn recorded in $DEPLOYMENTS."

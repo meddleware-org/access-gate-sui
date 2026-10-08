@@ -16,8 +16,9 @@ to restrict to holders of a specific NFT. It knows nothing about any particular 
   routed to the recipient and an NFT is minted to the buyer atomically.
 - **On-chain single-use** — `consume(nft, gate, platform, nonce)` decrements a use and emits
   `AccessConsumedEvent` carrying the caller-supplied `nonce` (≥ 8 bytes) and the `consumer`
-  address, so an off-chain verifier can bind one grant to one on-chain consumption. Replay
-  protection (nonce uniqueness and freshness) is the verifier's job — see
+  address, and the consume transaction has a digest, so an off-chain verifier can bind one grant to one
+  on-chain consumption (digest-first: the digest, the event's `consumer` and `gate_id`, redeemed once).
+  Replay protection is the verifier's job — see
   [SECURITY.md](SECURITY.md) and [docs/onchain/dev-guide.md](docs/onchain/dev-guide.md).
 - **Platform commission and fees** — a shared `PlatformConfig` routes the commission on every paid
   mint (0.2% by default, never less than `min_commission_mist` — 0.001 SUI — and never more than 10%
@@ -48,7 +49,7 @@ to `.env.<network>` for the gateway and frontend to consume.
 | `airdrop(cap, gate, platform, payment, recipient)` | `AdminCap` | Grant a pass; the admin pays the commission a sale would carry. |
 | `burn(nft)` / `burn_soulbound(nft)` | NFT owner | Voluntary destroy. |
 | `set_price(cap, gate, platform, price)` / `make_gate_free(cap, gate, platform, payment)` | `AdminCap` | Re-price (paid ≥ minimum; 0 only once the free-gate fee is paid). |
-| `set_paused` / `set_payment_recipient` / `set_default_uses` / `set_soulbound` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` — each `(cap, gate, platform, value)` | `AdminCap` | Reconfigure the gate. |
+| `set_paused` / `set_payment_recipient` / `set_default_uses` / `set_auto_burn_at_zero` / `set_nft_name` / `set_nft_image_url` / `set_nft_description` — each `(cap, gate, platform, value)` | `AdminCap` | Reconfigure the gate. `soulbound` has no setter, and `set_default_uses` keeps the kind of pass (0 stays 0, N stays N > 0: abort 16). |
 | `make_gate_immutable(cap, gate, platform: &PlatformConfig)` | `AdminCap` (consumed) | Irreversibly freeze the gate's config (refused while paused if the policy says so; snapshots the commission if the policy locks it). |
 | `set_platform_treasury` / `set_commission_bps` / `set_min_commission_mist` / `set_free_gate_fee_mist` | `PlatformAdminCap` | Platform treasury and terms (rate ≤ 1000 bps). |
 | `migrate(cap, platform)` | `PlatformAdminCap` | After an upgrade that bumps `VERSION`, move `PlatformConfig` to it; every older version then aborts (`E_WRONG_VERSION`). |
@@ -63,8 +64,8 @@ The full reference (objects, events, abort codes, views) is in
 
 `GateCreatedEvent`, `AccessMintedEvent`, `AccessConsumedEvent` (carries `nonce` + `consumer`),
 `AccessBurnedEvent`, `GateFrozenEvent` (carries the locked commission terms, if any),
-`GateMadeFreeEvent`, `PlatformConfigUpdatedEvent`, `PlatformMigratedEvent`. Off-chain indexers subscribe to these; the consume event's `nonce` is
-the binding key for single-use verification.
+`GateMadeFreeEvent`, `PlatformConfigUpdatedEvent`, `PlatformMigratedEvent`. Off-chain indexers subscribe to these; a verifier binds a
+single-use grant to the consume transaction's digest, the event's `consumer` and `gate_id`.
 
 ## Consuming this package as a dependency
 

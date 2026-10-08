@@ -12,7 +12,8 @@ This policy covers security issues in:
   `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4` and
   `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d` while gates created on them
   are in use)
-- The deployment scripts (`scripts/publish.sh`) as they affect capability custody
+- The deployment and custody scripts (`scripts/publish.sh`, `transfer-platform-authority.sh`,
+  `make-immutable.sh`, `multisig-address.sh`) as they affect capability custody
 
 It does not cover:
 
@@ -21,8 +22,19 @@ It does not cover:
 - The **off-chain verifier's** replay discipline — on-chain, `consume` only enforces a minimum
   nonce length (≥ 8 bytes, `E_INVALID_NONCE`) and records `consumer` (the sender) in
   `AccessConsumedEvent`; it does **not** enforce nonce uniqueness or freshness. A gateway that grants
-  access MUST bind the consumption to `(gate_id, nft_id, consumer, server-issued nonce, consume tx
-  digest)`, accept each nonce once, and enforce its own freshness window
+  access MUST use the **digest-first** binding: the consume transaction's digest (read from a finalised
+  transaction), the exact event type of this package, the event's `consumer`/transaction sender equal to
+  the signer who asked for access, and `gate_id` equal to the gate; a signed message that names the
+  verifier's own audience and the digest; each digest redeemed once in a redemption store; and a bounded
+  consumption age. The event `nonce` is available for a verifier that also issues challenges, but the
+  protocol does not depend on it. See [docs/onchain/dev-guide.md](docs/onchain/dev-guide.md).
+- **Platform-authority parameters.** The `PlatformAdminCap` holder can raise `min_commission_mist`
+  (which raises the minimum paid price, saturating at `u64::MAX`) and `free_gate_fee_mist` without
+  an upgrade, which can halt new paid gates, re-pricing and free-gate creation across the package; the
+  per-mint 10% cap still protects creators' existing sales, and clients split exact amounts so a fee
+  raised between preview and execution aborts instead of overcharging. This is a trust assumption about
+  the platform authority (a multisig before mainnet, see `CUSTODY.md`), not a defect; there are no on-chain
+  ceilings on these two values.
 - Operator key custody of the `PlatformAdminCap`, `Publisher`, `Display`, or `UpgradeCap` (these are
   deployment/operational decisions — see the audit's pre-mainnet gate)
 
@@ -79,8 +91,16 @@ gates, NFTs, and `PlatformConfig` remain valid forever. No one is forced to migr
 - If you monitor `AccessConsumedEvent` for access control, you must subscribe to events from
   **every package address you trust**. Add new addresses; never remove old ones while gates from
   that version are still in use.
-- An NFT minted under v1 (`0x<v1_addr>::access_gate::AccessNFT`) cannot be consumed by a v2
-  `consume` call. Route each consume transaction to the package version that minted the NFT.
+- **Upgrade (same original id).** The NFT type is defined at the original id and survives an upgrade, but
+  after `migrate` every older `published-at` aborts (`E_WRONG_VERSION`): always call the latest
+  `published-at` from `Published.toml` / the client `deployments`.
+- **Fresh package (new original id).** An NFT minted under one package (`0x<v1_addr>::access_gate::AccessNFT`)
+  cannot be consumed by another package's `consume`. Route each consume transaction to the package that
+  minted the NFT, and subscribe to every original id you trust.
+- The kind of pass a gate mints is fixed at creation: `soulbound` has no setter, and `set_default_uses`
+  cannot switch between unlimited and single-use (`E_USES_KIND_IMMUTABLE`). A policy whose pause blocks
+  `consume` or decryption must also require the gate to be unpaused to freeze (`E_POLICY_COMBINATION`), so a
+  gate can never be frozen into a state where sold passes are permanently unusable.
 
 The `UpgradeCap` (while it exists) and the custody multisig are themselves in scope for security reporting:
 compromise would give an attacker upgrade authority over all existing gates.

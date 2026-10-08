@@ -4,10 +4,11 @@
 #[test_only]
 module access_gate::access_gate_tests;
 
-use access_gate::access_gate::{Self, Gate, AdminCap, AccessNFT, SoulboundAccessNFT, PlatformConfig, PlatformAdminCap, ACCESS_GATE};
+use access_gate::access_gate::{Self, Gate, AdminCap, AccessNFT, SoulboundAccessNFT, PlatformConfig, PlatformAdminCap, ACCESS_GATE, AccessBurnedEvent};
 use sui::display::Display;
 use sui::package::Publisher;
 use sui::coin;
+use sui::event;
 use sui::sui::SUI;
 use sui::test_scenario as ts;
 
@@ -491,7 +492,7 @@ fun test_airdrop_grants_without_payment() {
 #[test]
 fun test_admin_setters() {
     let mut s = ts::begin(CREATOR);
-    new_gate(&mut s, 100, 0, false, false);
+    new_gate(&mut s, 100, 3, false, false);
     s.next_tx(CREATOR);
     let cap = s.take_from_sender<AdminCap>();
     let mut gate = s.take_shared<Gate>();
@@ -500,14 +501,13 @@ fun test_admin_setters() {
     let platform = s.take_shared<PlatformConfig>();
     access_gate::set_price(&cap, &mut gate, &platform, 250);
     access_gate::set_default_uses(&cap, &mut gate, &platform, 5);
-    access_gate::set_soulbound(&cap, &mut gate, &platform, true);
     access_gate::set_auto_burn_at_zero(&cap, &mut gate, &platform, true);
     access_gate::set_payment_recipient(&cap, &mut gate, &platform, BUYER);
     ts::return_shared(platform);
 
     assert!(gate.gate_price_mist() == 250, 0);
     assert!(gate.gate_default_uses() == 5, 1);
-    assert!(gate.gate_is_soulbound(), 2);
+    assert!(!gate.gate_is_soulbound(), 2); // the flag is fixed at creation: there is no setter
     assert!(gate.gate_auto_burn_at_zero(), 3);
     assert!(gate.gate_payment_recipient() == BUYER, 4);
 
@@ -1294,7 +1294,7 @@ fun test_airdrop_underpaid_commission_aborts() {
 fun consume_while_paused(block: bool) {
     let mut s = ts::begin(CREATOR);
     setup_platform(&mut s);
-    new_gate_full(&mut s, 0, 2, false, false, access_gate::new_gate_policy(false, false, false, block));
+    new_gate_full(&mut s, 0, 2, false, false, access_gate::new_gate_policy(block, false, false, block));
     s.next_tx(BUYER);
     let gate = s.take_shared<Gate>();
     let platform = s.take_shared<PlatformConfig>();
@@ -1478,21 +1478,6 @@ fun test_wrong_version_blocks_set_default_uses() {
     let mut gate = s.take_shared<Gate>();
     let platform = s.take_shared<PlatformConfig>();
     access_gate::set_default_uses(&cap, &mut gate, &platform, 5);
-    s.return_to_sender(cap);
-    ts::return_shared(gate);
-    ts::return_shared(platform);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = 13)]
-fun test_wrong_version_blocks_set_soulbound() {
-    let mut s = ts::begin(CREATOR);
-    versioned_setup(&mut s, false, 2);
-    let cap = s.take_from_sender<AdminCap>();
-    let mut gate = s.take_shared<Gate>();
-    let platform = s.take_shared<PlatformConfig>();
-    access_gate::set_soulbound(&cap, &mut gate, &platform, true);
     s.return_to_sender(cap);
     ts::return_shared(gate);
     ts::return_shared(platform);
@@ -1752,3 +1737,188 @@ fun test_init_and_test_configs_start_at_the_package_version() {
     ts::return_shared(platform);
     s.end();
 }
+
+// ── F36: policy combinations that could freeze a gate into a dead state ────────────────
+
+#[test]
+#[expected_failure(abort_code = 15, location = access_gate)] // E_POLICY_COMBINATION
+fun test_policy_pause_blocks_access_without_freeze_guard_aborts() {
+    let _p = access_gate::new_gate_policy(false, false, false, true);
+    abort 0
+}
+
+#[test]
+#[expected_failure(abort_code = 15, location = access_gate)] // E_POLICY_COMBINATION
+fun test_policy_pause_blocks_decryption_without_freeze_guard_aborts() {
+    let _p = access_gate::new_gate_policy(false, true, true, false);
+    abort 0
+}
+
+#[test]
+fun test_policy_combinations_that_are_allowed() {
+    // Pause may block access and decryption when the gate cannot be frozen while paused …
+    let both = access_gate::new_gate_policy(true, false, true, true);
+    assert!(access_gate::policy_pause_blocks_access(&both), 0);
+    assert!(access_gate::policy_freeze_requires_unpaused(&both), 1);
+    // … and without any pause-blocks flag the freeze guard is optional.
+    let _open = access_gate::new_gate_policy(false, true, false, false);
+    let _guarded = access_gate::new_gate_policy(true, false, false, false);
+}
+
+// ── F35: the kind of pass a gate mints is fixed ────────────────────────────────────────────
+
+#[test]
+#[expected_failure(abort_code = 16, location = access_gate)] // E_USES_KIND_IMMUTABLE
+fun test_set_default_uses_cannot_turn_unlimited_into_single_use() {
+    let mut s = ts::begin(CREATOR);
+    new_gate(&mut s, 100, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_default_uses(&cap, &mut gate, &platform, 1);
+    ts::return_shared(platform);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 16, location = access_gate)] // E_USES_KIND_IMMUTABLE
+fun test_set_default_uses_cannot_turn_single_use_into_unlimited() {
+    let mut s = ts::begin(CREATOR);
+    new_gate(&mut s, 100, 2, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_default_uses(&cap, &mut gate, &platform, 0);
+    ts::return_shared(platform);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+fun test_set_default_uses_may_change_the_count() {
+    let mut s = ts::begin(CREATOR);
+    new_gate(&mut s, 100, 2, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_default_uses(&cap, &mut gate, &platform, 9);
+    assert!(gate.gate_default_uses() == 9, 0);
+    ts::return_shared(platform);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+
+#[test]
+fun test_set_default_uses_keeps_unlimited_unlimited() {
+    let mut s = ts::begin(CREATOR);
+    new_gate(&mut s, 100, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_default_uses(&cap, &mut gate, &platform, 0);
+    assert!(gate.gate_default_uses() == 0, 0);
+    ts::return_shared(platform);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+
+// ── F37: paths other packages and the live relay rely on ───────────────────────────────
+
+#[test]
+fun test_soulbound_auto_burn_consume_to_zero_emits_burn_and_deletes() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    new_gate(&mut s, 0, 1, true, true); // soulbound, one use, burn at zero (the live relay shape)
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&gate, &platform, coin::mint_for_testing<SUI>(0, s.ctx()), s.ctx());
+    ts::return_shared(gate);
+    ts::return_shared(platform);
+
+    s.next_tx(BUYER);
+    let gate = s.take_shared<Gate>();
+    let nft = s.take_from_sender<SoulboundAccessNFT>();
+    consume_soulbound_t(&mut s, nft, &gate, b"00000001");
+    // The burn is announced (emit-before-delete) in the same transaction as the last consume …
+    assert!(event::events_by_type<AccessBurnedEvent>().length() == 1, 0);
+    ts::return_shared(gate);
+
+    // … and the pass no longer exists.
+    s.next_tx(BUYER);
+    assert!(!s.has_most_recent_for_sender<SoulboundAccessNFT>(), 1);
+    s.end();
+}
+
+#[test]
+fun test_is_valid_for_is_true_only_for_the_passes_own_gate() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    new_gate(&mut s, 0, 0, false, false);
+    s.next_tx(CREATOR);
+    let gate_a = ts::most_recent_id_shared<Gate>().destroy_some();
+    new_gate(&mut s, 0, 0, true, false);
+    s.next_tx(CREATOR);
+    let gate_b = ts::most_recent_id_shared<Gate>().destroy_some();
+
+    s.next_tx(BUYER);
+    let ga = s.take_shared_by_id<Gate>(gate_a);
+    let gb = s.take_shared_by_id<Gate>(gate_b);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::purchase(&ga, &platform, coin::mint_for_testing<SUI>(0, s.ctx()), s.ctx());
+    access_gate::purchase(&gb, &platform, coin::mint_for_testing<SUI>(0, s.ctx()), s.ctx());
+    ts::return_shared(platform);
+    s.next_tx(BUYER);
+    let pass = s.take_from_sender<AccessNFT>();
+    let soulbound = s.take_from_sender<SoulboundAccessNFT>();
+
+    assert!(access_gate::is_valid_for(&pass, &ga), 0);
+    assert!(!access_gate::is_valid_for(&pass, &gb), 1);
+    assert!(access_gate::is_valid_for_soulbound(&soulbound, &gb), 2);
+    assert!(!access_gate::is_valid_for_soulbound(&soulbound, &ga), 3);
+    assert!(access_gate::gate_id(&pass) == object::id(&ga), 4);
+    assert!(access_gate::gate_id_soulbound(&soulbound) == object::id(&gb), 5);
+
+    ts::return_shared(ga);
+    ts::return_shared(gb);
+    s.return_to_sender(pass);
+    s.return_to_sender(soulbound);
+    s.end();
+}
+
+#[test]
+fun test_display_setters_and_views() {
+    let mut s = ts::begin(CREATOR);
+    new_gate(&mut s, 100, 0, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_nft_name(&cap, &mut gate, &platform, b"Pass".to_string());
+    access_gate::set_nft_image_url(&cap, &mut gate, &platform, b"https://example.com/p.png".to_string());
+    access_gate::set_nft_description(&cap, &mut gate, &platform, b"Entry".to_string());
+    assert!(gate.gate_nft_name() == b"Pass".to_string(), 0);
+    assert!(gate.gate_nft_image_url() == b"https://example.com/p.png".to_string(), 1);
+    assert!(gate.gate_nft_description() == b"Entry".to_string(), 2);
+    // The cap and the gate point at each other.
+    assert!(gate.gate_admin_cap_id() == object::id(&cap), 3);
+    assert!(access_gate::admin_cap_gate_id(&cap) == object::id(&gate), 4);
+    assert!(!gate.gate_pause_blocks_access(), 5);
+    let terms = access_gate::commission_terms_for_testing(20, 1_000_000);
+    assert!(access_gate::terms_bps(&terms) == 20, 6);
+    assert!(access_gate::terms_min_mist(&terms) == 1_000_000, 7);
+    ts::return_shared(platform);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+

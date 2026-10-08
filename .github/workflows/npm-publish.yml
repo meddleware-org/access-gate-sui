@@ -1,8 +1,8 @@
 name: Publish (npm)
 
 # Publishes the package to npmjs on a v* tag. Publication is gated on a
-# self-contained `verify` job (type-check + test + build) that re-runs the
-# checks against the exact tagged commit, so a broken tag never ships.
+# `verify` job that runs the same workflow as CI (Move build with lints as errors, Move tests, shellcheck
+# of the custody scripts) on the exact tagged commit, so a broken tag never ships.
 # Authentication uses npm OIDC trusted publishing — no long-lived NPM_TOKEN.
 
 on:
@@ -15,37 +15,8 @@ permissions:
 
 jobs:
   verify:
-    name: Verify (type-check + test)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-      - name: Install dependencies
-        run: npm ci
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
-      - name: Type-check
-        run: npm run type-check --if-present
-      # `npm test` runs `sui move test`, so the verify job needs the Sui CLI (same pinned
-      # version as move-ci.yml).
-      - name: Install suiup
-        run: |
-          curl -fsSLo /tmp/suiup.tgz "https://github.com/MystenLabs/suiup/releases/download/v0.0.14/suiup-Linux-musl-x86_64.tar.gz"
-          echo "c0b9fea95d52c4c5855478c3ee56e58e446614f32300dbd41fcc637a2e09878a  /tmp/suiup.tgz" | sha256sum -c -
-          mkdir -p "$HOME/.local/bin" && tar -xzf /tmp/suiup.tgz -C "$HOME/.local/bin" suiup
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Install Sui CLI (testnet channel)
-        run: |
-          suiup install sui@testnet-v1.81.0
-          suiup switch sui@testnet-v1.81.0
-      - name: Verify Sui version
-        run: sui --version
-      - name: Unit tests
-        run: npm run test --if-present
-      - name: Build
-        run: npm run build --if-present
+    name: Verify (CI checks)
+    uses: ./.github/workflows/move-ci.yml
 
   publish-npm:
     name: npmjs (@meddleware/access-gate-sui)
@@ -65,8 +36,6 @@ jobs:
         run: npm install -g npm@11.20.0
       - name: Install dependencies
         run: npm ci
-      - name: Build
-        run: npm run build --if-present
       - name: Tag matches the package version
         env:
           TAG: ${{ github.ref_name }}

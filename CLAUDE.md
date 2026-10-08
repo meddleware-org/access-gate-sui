@@ -30,8 +30,9 @@ Consumers (a gateway, a frontend, a contract) compose on top.
    minted to sender, overpayment refunded, in one call. No operator co-sign.
 2. **Single-use is spent on-chain by the owner.** `consume` requires the NFT by value,
    asserts a ≥ 8-byte `nonce`, `SingleUse` + `uses_remaining > 0`, decrements, and emits
-   `AccessConsumedEvent { nonce, consumer }`. A verifier binds a challenge to a consumption via
-   that `nonce` + `consumer` and enforces nonce uniqueness/freshness itself — never trust a bare
+   `AccessConsumedEvent { nonce, consumer }`. A verifier binds a grant to the consume transaction's
+   **digest** (+ the exact event type, `consumer` = signer, `gate_id`) and redeems each digest once itself
+   — never trust a bare
    address. Off-chain systems cannot decrement an NFT.
 3. **`E_WRONG_GATE` guards cross-gate use** — `consume`/admin setters assert the NFT/cap
    belongs to the supplied gate.
@@ -41,7 +42,9 @@ Consumers (a gateway, a frontend, a contract) compose on top.
    emitted with the id, then `id.delete()`.
 6. **Commission arithmetic never overflows** — `commission_for` multiplies in u128 and rounds
    down; `commission_bps` ≤ 1000; the platform treasury is never `@0x0`.
-7. **`GatePolicy` is immutable per gate** — set by `create_gate`/`create_free_gate`, no setter.
+7. **`GatePolicy` is immutable per gate** — set by `create_gate`/`create_free_gate`, no setter. A policy whose pause
+   blocks decryption or access must set `freeze_requires_unpaused` (`E_POLICY_COMBINATION`). The pass kind is
+   fixed too: no `soulbound` setter, and `set_default_uses` cannot cross zero (`E_USES_KIND_IMMUTABLE`).
    Mints use `effective_commission_terms` (freeze snapshot if locked, else live terms).
    `pause_blocks_access` is enforced here (`consume` aborts) and by gateways;
    `pause_blocks_decryption` only by dependants (`seal_policies::nft_gate`).
@@ -60,14 +63,14 @@ Consumers (a gateway, a frontend, a contract) compose on top.
 `E_PAUSED=1`, `E_INSUFFICIENT_PAYMENT=2`, `E_NOT_SINGLE_USE=3`, `E_NO_USES_REMAINING=4`,
 `E_WRONG_GATE=5`, `E_GATE_FROZEN=6`, `E_COMMISSION_TOO_HIGH=7`, `E_INVALID_NONCE=8`,
 `E_ZERO_ADDRESS=9`, `E_FREEZE_WHILE_PAUSED=10`, `E_PRICE_TOO_LOW=11`, `E_FREE_FEE_UNPAID=12`,
-`E_WRONG_VERSION=13`, `E_NOT_UPGRADE=14`.
+`E_WRONG_VERSION=13`, `E_NOT_UPGRADE=14`, `E_POLICY_COMBINATION=15`, `E_USES_KIND_IMMUTABLE=16`.
 Tests reference these by literal in `#[expected_failure(abort_code = …)]` because
 module-private constants are not cross-module referenceable in that attribute — keep the
 literal and the constant in sync if you renumber.
 
 ## Testing
 
-`sui move test --build-env testnet` — 85 tests (`tests/access_gate_tests.move`): `init` defaults,
+`sui move test --build-env testnet` — 94 tests (`tests/access_gate_tests.move`): `init` defaults,
 gate creation, purchase (exact/overpay/free/underpay/paused, commission split, u64::MAX price at
 the 10% cap, dust rounding), single-use decrement + receipt vs auto-burn, every abort code on both
 the transferable and soulbound paths, foreign-cap and frozen-gate guards, platform setters, voluntary
@@ -100,10 +103,9 @@ entries/branches.
   (`GateCreated`/`AccessMinted`/`AccessConsumed`{`nonce`}/`AccessBurned`), and the error-code table.
   These same tables feed the docs-site Access Gate *reference* page and the `dev.` deep-dive.
 - **Composition guide:** how a gateway/frontend/contract composes on the consumer-agnostic primitive;
-  the `consume`→`nonce` binding that verifiers must use (never trust a bare address).
+  the digest-first binding that verifiers must use (the `nonce` is optional) (never trust a bare address).
 
 ### White-label (to write later)
 
 - Operators deploying their **own gate set** under the shared platform (commission enforced by
-  `PlatformConfig`); which knobs are gate-owner-controlled (`price_mist`, `default_uses`, `soulbound`,
-  `auto_burn_at_zero`, `paused`) vs platform-only (`set_platform_treasury`, `set_commission_bps`).
+  `PlatformConfig`); which knobs are gate-owner-controlled (`price_mist`, `default_uses` count, `auto_burn_at_zero`, `paused`, display fields; `soulbound` is fixed at creation) vs platform-only (`set_platform_treasury`, `set_commission_bps`).

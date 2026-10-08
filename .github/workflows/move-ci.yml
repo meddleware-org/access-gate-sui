@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The release workflow runs the same checks on the tagged commit.
+  workflow_call:
 
 permissions:
   contents: read
@@ -29,10 +31,16 @@ jobs:
           suiup install sui@testnet-v1.81.0
           suiup switch sui@testnet-v1.81.0
 
-      - name: Verify Sui version
-        run: sui --version
+      - name: Verify Sui version and binary checksum
+        run: |
+          sui --version
+          # The release asset suiup downloads is not checksum-verified by suiup itself: pin the binary.
+          echo "c86c0481a44174dfa17af89e71292d6fba5df267c66722ae6797e8793a22f7f1  $(command -v sui)" | sha256sum -c -
 
-      - name: Build and test
+      - name: Build (lints on, warnings are errors)
+        run: sui move build --build-env testnet --lint --warnings-are-errors
+
+      - name: Test
         run: sui move test --build-env testnet
 
   shellcheck:

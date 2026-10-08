@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Transfer platform authority objects from the deploy EOA to a multisig/governance address.
 #
-# Objects transferred (IDs recorded by `publish.sh` in .env.<network> — never discovered by guessing):
+# Objects transferred (IDs recorded by `publish.sh` in deployments.json `authorityObjects` (committed) and
+# .env.<network> — never discovered by guessing; deployments.json wins when both exist):
 #   - PlatformAdminCap   — authorises set_platform_treasury / set_commission_bps
 #   - Publisher          — required for future Display updates
 #   - Display<AccessNFT>
@@ -56,6 +57,15 @@ MULTISIG_ADDRESS="${MULTISIG_ADDRESS:-${POSITIONAL[0]:-}}"
 [[ -n "$MULTISIG_ADDRESS" ]] || { warn "ERROR: MULTISIG_ADDRESS is required (env var or \$1)."; exit 1; }
 [[ "$MULTISIG_ADDRESS" =~ ^0x[0-9a-fA-F]{64}$ ]] || { warn "ERROR: MULTISIG_ADDRESS must be a 0x-prefixed 64-hex address."; exit 1; }
 
+# The committed record of the authority objects (written by publish.sh) is preferred over the git-ignored .env.
+DEPLOYMENTS_JSON="$(dirname "$0")/../deployments.json"
+rec() { [[ -f "$DEPLOYMENTS_JSON" ]] && jq -r --arg n "$NETWORK" --arg k "$1" '.[$n].authorityObjects[$k] // empty' "$DEPLOYMENTS_JSON" 2>/dev/null || true; }
+for pair in platformAdminCap:ACCESS_GATE_PLATFORM_ADMIN_CAP_ID publisher:ACCESS_GATE_PUBLISHER_ID \
+            displayAccessNft:ACCESS_GATE_DISPLAY_ACCESS_NFT_ID displaySoulboundNft:ACCESS_GATE_DISPLAY_SOULBOUND_NFT_ID \
+            upgradeCap:ACCESS_GATE_UPGRADE_CAP_ID; do
+  value="$(rec "${pair%%:*}")"
+  [[ -z "$value" ]] || printf -v "${pair##*:}" '%s' "$value"
+done
 PACKAGE_ID="${ACCESS_GATE_PACKAGE_ID:-${PACKAGE_ID:-}}"
 [[ -n "$PACKAGE_ID" ]] || { warn "ERROR: ACCESS_GATE_PACKAGE_ID not set — run publish.sh or source .env.${NETWORK}."; exit 1; }
 
@@ -82,6 +92,14 @@ preflight() {
 }
 preflight "$(dirname "$0")/../Published.toml"
 ACTIVE_ADDRESS="$(sui client active-address 2>/dev/null)"
+# The active address must be the expected holder of these objects (EXPECTED_SIGNER; mainnet requires it).
+if [[ -n "${EXPECTED_SIGNER:-}" ]]; then
+  [[ "$EXPECTED_SIGNER" =~ ^0x[0-9a-fA-F]{1,64}$ ]] || { warn "ERROR: EXPECTED_SIGNER must be a 0x-prefixed address."; exit 1; }
+  [[ "$(printf '0x%064s' "${EXPECTED_SIGNER#0x}" | tr ' ' 0 | tr A-F a-f)" == "$(printf '0x%064s' "${ACTIVE_ADDRESS#0x}" | tr ' ' 0 | tr A-F a-f)" ]] \
+    || { warn "ERROR: the active address $ACTIVE_ADDRESS is not EXPECTED_SIGNER $EXPECTED_SIGNER."; exit 1; }
+elif [[ "$NETWORK" == "mainnet" ]]; then
+  warn "ERROR: mainnet requires EXPECTED_SIGNER."; exit 1
+fi
 
 # Long-form (64-hex) address, lower-case, for comparing on-chain type strings.
 long_addr() { local h="${1#0x}"; printf '0x%064s' "${h,,}" | tr ' ' 0; }
@@ -157,7 +175,17 @@ for i in "${!IDS[@]}"; do
   echo "OK    ${LABELS[$i]} transferred (tx $(jq -r '.digest // "?"' <<<"$(awk '/^{/,0' <<<"$OUT")"))."
 done
 echo ""
-echo "All transfers submitted. Verify ownership on-chain for $MULTISIG_ADDRESS ($NETWORK)."
+# Re-read every object: the transfer succeeded only if the new owner is the multisig.
+for i in "${!IDS[@]}"; do
+  OWNER="$(sui client object "${IDS[$i]}" --json 2>/dev/null | jq -r '.owner.AddressOwner // empty')"
+  if [[ "$(long_addr "$OWNER")" != "$(long_addr "$MULTISIG_ADDRESS")" ]]; then
+    warn "ERROR: ${LABELS[$i]} ${IDS[$i]} is owned by '${OWNER:-<unknown>}' after the transfer, not $MULTISIG_ADDRESS."
+    warn "       Do not record the handoff; investigate (the objects sent before it are already with the multisig)."
+    exit 1
+  fi
+  echo "OK    ${LABELS[$i]} is now owned by the multisig."
+done
+echo "All transfers verified on-chain for $MULTISIG_ADDRESS ($NETWORK)."
 DEPLOYMENTS="$(dirname "$0")/../deployments.json"
 if [[ "$NETWORK" != "localnet" && -f "$DEPLOYMENTS" ]]; then
   jq --arg n "$NETWORK" --arg ms "$MULTISIG_ADDRESS" --arg cap "$INCLUDE_UPGRADE_CAP" \

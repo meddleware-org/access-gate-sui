@@ -25,15 +25,21 @@
 /// A gating *server* can only READ ownership (`getOwnedObjects`); it holds no authority
 /// to mutate a user's NFT and submits no transaction. A genuine one-time-use therefore
 /// must be spent by the **owner's own** `consume(nft, nonce, ...)` call, which emits an
-/// `AccessConsumedEvent` carrying the server-issued challenge `nonce`. The server then
-/// binds one grant to one on-chain consumption by matching that nonce — replay-proof and
-/// fully on-chain. This module never trusts a bare address claim.
+/// `AccessConsumedEvent` (`nft_id`, `gate_id`, `nonce`, `consumer`). A verifier binds a grant to that
+/// consumption by its **transaction digest**: it finds the consume transaction, requires the exact event
+/// type of this package, `sender` = the signer who asked for access, and `gate_id` = its gate, and spends
+/// each digest once in a redemption store (a lease, then a commit or release). The caller's signature
+/// must cover the verifier's own audience and the digest, so a signature cannot be replayed at another
+/// verifier. The event `nonce` is carried for the consumer's own use (it may match it to a challenge,
+/// but the digest-first protocol does not need to). This module never trusts a bare address claim.
 ///
 /// ## Transferability
 ///
-/// Each gate chooses, at creation, whether its NFTs are transferable (`AccessNFT`, which
-/// has `store`) or **soulbound** (`SoulboundAccessNFT`, which lacks `store` and so cannot
-/// be moved by `public_transfer`). Soulbound is appropriate when a secondary market would
+/// Each gate chooses, at creation and for good, whether its NFTs are transferable (`AccessNFT`,
+/// which has `store`) or **soulbound** (`SoulboundAccessNFT`, which lacks `store` and so cannot
+/// be moved by `public_transfer`). Neither the flag nor the kind of pass (unlimited or single-use)
+/// can be switched afterwards, so a verifier configured for one NFT type is never left with a gate
+/// that mints another. Soulbound is appropriate when a secondary market would
 /// undermine rate limits (e.g. a relay pass); transferable suits tradeable goods (e.g.
 /// gacha items).
 ///
@@ -44,7 +50,7 @@
 ///
 /// ## Governance & immutability
 ///
-/// Price, recipient, pause, and flags are **governable** by default via the `AdminCap`
+/// Price, recipient, pause, the number of uses and the display fields are **governable** by default via the `AdminCap`
 /// minted to the gate creator (`set_price`, `set_payment_recipient`, …). An operator who
 /// wants to guarantee to users that a gate can never change may **renounce** governance
 /// with `make_gate_immutable`, which consumes the `AdminCap` and sets `Gate.frozen = true`
@@ -151,6 +157,14 @@ const E_FREE_FEE_UNPAID: u64 = 12;
 const E_WRONG_VERSION: u64 = 13;
 /// `migrate` was called when `PlatformConfig` is already at (or past) this package version.
 const E_NOT_UPGRADE: u64 = 14;
+
+/// A `GatePolicy` that can block `consume` or decryption while paused but lets the gate be frozen while
+/// paused: the gate could then never be unpaused, destroying every sold, unspent pass.
+const E_POLICY_COMBINATION: u64 = 15;
+/// `set_default_uses` tried to switch a gate between unlimited passes (0) and single-use passes (N > 0).
+/// The kind of pass a gate mints is fixed at creation (verifiers are configured for one kind); only the
+/// number of uses of a single-use gate can change.
+const E_USES_KIND_IMMUTABLE: u64 = 16;
 
 /// This package version. Bump it in every upgrade that must retire older versions, then call `migrate`.
 const VERSION: u64 = 1;
@@ -450,12 +464,20 @@ public fun default_gate_policy(): GatePolicy {
 }
 
 /// Build a `GatePolicy` for `create_gate` / `create_free_gate` (callable from a PTB).
+///
+/// A policy whose pause blocks decryption or access must also require the gate to be unpaused to freeze
+/// (`freeze_requires_unpaused`): otherwise an admin could pause and freeze the gate, after which no
+/// holder could consume a pass or decrypt content, ever (`E_POLICY_COMBINATION`).
 public fun new_gate_policy(
     freeze_requires_unpaused: bool,
     lock_commission_on_freeze: bool,
     pause_blocks_decryption: bool,
     pause_blocks_access: bool,
 ): GatePolicy {
+    assert!(
+        freeze_requires_unpaused || !(pause_blocks_decryption || pause_blocks_access),
+        E_POLICY_COMBINATION,
+    );
     GatePolicy {
         freeze_requires_unpaused,
         lock_commission_on_freeze,
@@ -937,7 +959,10 @@ public fun set_paused(
     gate.paused = paused;
 }
 
-/// Change the default uses for future mints (does not affect already-minted NFTs).
+/// Change the number of uses of future single-use mints (does not affect already-minted NFTs). The KIND of
+/// pass cannot change: a gate that mints unlimited passes (`default_uses == 0`) cannot start minting
+/// single-use passes, and the reverse (`E_USES_KIND_IMMUTABLE`). Verifiers are configured for one kind, and a
+/// silent switch would leave buyers holding passes the verifier cannot accept.
 public fun set_default_uses(
     cap: &AdminCap,
     gate: &mut Gate,
@@ -946,19 +971,8 @@ public fun set_default_uses(
 ) {
     check_version(platform);
     assert_admin_mutable(cap, gate);
+    assert!((default_uses == 0) == (gate.default_uses == 0), E_USES_KIND_IMMUTABLE);
     gate.default_uses = default_uses;
-}
-
-/// Switch the soulbound flag for future mints (does not affect already-minted NFTs).
-public fun set_soulbound(
-    cap: &AdminCap,
-    gate: &mut Gate,
-    platform: &PlatformConfig,
-    soulbound: bool,
-) {
-    check_version(platform);
-    assert_admin_mutable(cap, gate);
-    gate.soulbound = soulbound;
 }
 
 /// Toggle the auto-burn policy. The flag is read from the gate at `consume` time, so it
