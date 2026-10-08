@@ -59,7 +59,11 @@ MULTISIG_ADDRESS="${MULTISIG_ADDRESS:-${POSITIONAL[0]:-}}"
 
 # The committed record of the authority objects (written by publish.sh) is preferred over the git-ignored .env.
 DEPLOYMENTS_JSON="$(dirname "$0")/../deployments.json"
-rec() { [[ -f "$DEPLOYMENTS_JSON" ]] && jq -r --arg n "$NETWORK" --arg k "$1" '.[$n].authorityObjects[$k] // empty' "$DEPLOYMENTS_JSON" 2>/dev/null || true; }
+rec() {
+  if [[ -f "$DEPLOYMENTS_JSON" ]]; then
+    jq -r --arg n "$NETWORK" --arg k "$1" '.[$n].authorityObjects[$k] // empty' "$DEPLOYMENTS_JSON" 2>/dev/null || true
+  fi
+}
 for pair in platformAdminCap:ACCESS_GATE_PLATFORM_ADMIN_CAP_ID publisher:ACCESS_GATE_PUBLISHER_ID \
             displayAccessNft:ACCESS_GATE_DISPLAY_ACCESS_NFT_ID displaySoulboundNft:ACCESS_GATE_DISPLAY_SOULBOUND_NFT_ID \
             upgradeCap:ACCESS_GATE_UPGRADE_CAP_ID; do
