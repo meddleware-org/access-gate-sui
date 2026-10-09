@@ -1,11 +1,18 @@
 {
   "testnet": {
-    "platformConfigId": "0x53a325dc1ebd083c80fd5bed77e3e7cc989285283f188835793af3a7bd8504fa",
+    "platformConfigId": "0x3f81489df58233d96798f34ad44de325e1b4df7e4d615affe72ca181969ee7b5",
     "custody": {
       "multisigAddress": null,
       "upgradeCapOwner": "0xa991ae11b0785718cd3ad1c616e804a4c083f431b3144bb845bdec651164864a",
       "plannedBurnDate": null,
       "burnedAt": null
+    },
+    "authorityObjects": {
+      "platformAdminCap": "0x6debe2328f31cf11808acded5ef02f16e4916da6e245988d302bae13d8e94aa0",
+      "publisher": "0x603ab7bf5d226071dd247319ef9eb6f1d186ba2d6baf22a3c84df785e7e0111f",
+      "displayAccessNft": "0xfde187721fa103d09c5ea7a7e86ffef459d0e39d962e285ece75d4507584ebdd",
+      "displaySoulboundNft": "0x27e9642e271d80248153be154a6d388a911298061147f0998af5c6497a38453d",
+      "upgradeCap": "0x7d63f6230dc3d711345f23dc1354d4a7d5beeb85aa7dbc80b1ab8df92dfddf92"
     }
   }
 }
