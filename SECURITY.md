@@ -8,7 +8,8 @@ This policy covers security issues in:
   double-spend of a single-use pass, soulbound-transfer escape, commission/fee/payment mis-routing or evasion,
   arithmetic over/underflow, or a bypass of the gate-freeze (immutability) guard
 - The published testnet package at
-  `0xa55789d77b8ae41e604c1c2e9ad9f7b034ca69b028ad0f1eee7d7cc8ad886d41` (and the superseded
+  `0xd7ddaa94b74330979b2b618fc81206d160a264f1c9ca148a77fa2144301388c9` (and the superseded
+  `0xa55789d77b8ae41e604c1c2e9ad9f7b034ca69b028ad0f1eee7d7cc8ad886d41`,
   `0x1a81ca177db039585e575beeeee4759466e55910e936a6733e38dbb65025eea4` and
   `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d` while gates created on them
   are in use)
@@ -70,9 +71,9 @@ treated as high severity:
 Each full release follows [CUSTODY.md](CUSTODY.md): the package is published, its `UpgradeCap` moves
 to the custody multisig, and the multisig burns it (`0x2::package::make_immutable`) on a planned date
 after a verification window. From then on the package bytecode can never change. **Current state:** the
-testnet package `0xa55789…` (version-gated, 2026-10-02) has a live `UpgradeCap` (`0x70be984f…e0ba`,
+testnet package `0xd7ddaa94…88c9` (2026-10-09) has a live `UpgradeCap` (`0x7d63f623…ddf92`,
 held by the publisher EOA) until the mainnet custody process is exercised; `deployments.json` records
-it. The superseded `0x1a81ca…` is immutable (its cap `0xf04a1d87…32bc` was burned on 2026-10-02). The older
+it. The superseded `0xa55789…` is immutable (its cap `0x70be984f…e0ba` was burned on 2026-10-09), as is `0x1a81ca…` (cap `0xf04a1d87…32bc`, burned 2026-10-02). The older
 `0x0bedd0…` and the stray test publishes are immutable (their caps were burned on 2026-09-28).
 
 **Version gating.** `PlatformConfig.version` names the only package version allowed to act: every

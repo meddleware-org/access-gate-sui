@@ -8,8 +8,8 @@ How to integrate with `access_gate` on-chain: building transactions, reading sta
 passes, and consuming single-use passes **replay-safely**. For every function, type, event and abort
 code see the [API reference](api-reference.md).
 
-Package (testnet): `0xa55789d77b8ae41e604c1c2e9ad9f7b034ca69b028ad0f1eee7d7cc8ad886d41`, `PlatformConfig`
-`0x53a325dc1ebd083c80fd5bed77e3e7cc989285283f188835793af3a7bd8504fa`.
+Package (testnet): `0xd7ddaa94b74330979b2b618fc81206d160a264f1c9ca148a77fa2144301388c9`, `PlatformConfig`
+`0x3f81489df58233d96798f34ad44de325e1b4df7e4d615affe72ca181969ee7b5`.
 The TypeScript client is `@meddleware/access-gate-client` (reads, events, builders, abort messages,
 and these ids per network in its `deployments` export); the examples below use `@mysten/sui`
 directly so the on-chain contract is explicit. `PKG` stands for both ids, which are equal until the
