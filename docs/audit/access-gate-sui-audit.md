@@ -30,8 +30,10 @@ The live Walrus relay gate is `0x316f1bf9764db352e925bb598aff44ea77be4ab652f0bd2
 read. The earlier relay gates `0xfd6c3b…b8a6` (on `0xa55789…`), `0xcb8206…5f50` (on `0x1a81ca…`) and
 `0x0485…` (on `0x0bedd0…`) are superseded.
 npm `@meddleware/access-gate-sui` 0.0.6 was published 2026-10-09T12:45Z (tag `v0.0.6` → `83dbf25`); 0.0.5
-(2026-10-02) carried the earlier, stale audit and remains on the registry (F43).
-**Review date:** 2026-09-18 (first pass) · relocated 2026-09-28 · re-verified 2026-10-03 · **re-verified 2026-10-09**
+(2026-10-02) carried the earlier, stale audit and remains on the registry (F43). Checked 2026-10-18: 0.0.6 is
+still `latest` (no newer release; `main` has only audit commits since the tag, `83dbf25`), SLSA v1 provenance present.
+Consumers: `@meddleware/access-gate-client` 0.0.9 pins `0.0.6` exactly (devDependency); the docs and dev sites depend on `^0.0.6`.
+**Review date:** 2026-09-18 (first pass) · relocated 2026-09-28 · re-verified 2026-10-03 · **re-verified 2026-10-09** · release status 2026-10-18
 **Reviewer:** Internal review (Move contract reviewer)
 **Severity ceiling:** High — the package moves SUI on every paid mint (price, commission, fees) and
   holds upgrade and platform authority, so a capability or accounting flaw could misroute funds for
@@ -1131,7 +1133,7 @@ through its own redemption store. The signed message names the verifier's audien
 | `Published.toml` | testnet | `0xd7ddaa94…88c9` | original-id = published-at (v1) | reference |
 | `deployments.json` | testnet | `PlatformConfig 0x3f81489d…e7b5`, `authorityObjects` | object | Y (matches docs and the client) |
 | `SECURITY.md`, `docs/onchain/{overview,dev-guide,api-reference}.md`, `Move.toml` comment | testnet | `0xd7ddaa94…` / `0x3f81489d…` | both | Y (`83dbf25`) |
-| `@meddleware/access-gate-client` 0.0.8 `src/deployments.ts` (generated from access-gate-sui 0.0.6) | testnet | `originalId`/`publishedAt` `0xd7ddaa94…`, `platformConfigId 0x3f81489d…` | both | Y |
+| `@meddleware/access-gate-client` 0.0.8 (0.0.9 since 2026-10-10, same record) `src/deployments.ts` (generated from access-gate-sui 0.0.6) | testnet | `originalId`/`publishedAt` `0xd7ddaa94…`, `platformConfigId 0x3f81489d…` | both | Y |
 | `seal-policies-sui` 0.0.7 `Move.toml`/`Move.lock` | testnet | `rev = 790695489fc4…` (`7906954`, the publish record of `0xd7ddaa94…`) | git SHA | Y |
 | `nft-gate/gateway-workers/wrangler.toml` `NFT_TYPE` / `GATE_ID` | testnet | `0xd7ddaa94…::access_gate::SoulboundAccessNFT` / gate `0x316f1bf9…` | original-id (type) | Y |
 | `nft-gate/gateway-rust/src/sui_rpc.rs:658-678` (env-gated live test) | testnet | `0xa55789…` / `0xfd6c3b…`, commented as the superseded immutable package/gate | original-id | N, deliberately: it replays a recorded consume on an immutable package and does not serve traffic |
@@ -1522,6 +1524,9 @@ tests, against the real contract (not a self-compared vector).
     only in history lines and "superseded" statements. A package object always reads `Immutable`, so the
     burn evidence is the missing cap object.
   - New this pass: F47 and F48 (see the findings).
+- 2026-10-18 — release status checked: no new release (`@meddleware/access-gate-sui` 0.0.6 is still `latest`, SLSA v1 provenance
+  present; tag `v0.0.6` = `83dbf25`; no code change on `main` since). Consumers re-read: access-gate-client 0.0.9 (released
+  2026-10-10) still generates `deployments.ts` from the exact pin `0.0.6`; docs and dev at `^0.0.6`. No finding or Section D box changes.
 
 ## Pre-save consistency checklist (this pass)
 
