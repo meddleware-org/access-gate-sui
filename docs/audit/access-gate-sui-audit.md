@@ -1527,6 +1527,8 @@ tests, against the real contract (not a self-compared vector).
 - 2026-10-18 — release status checked: no new release (`@meddleware/access-gate-sui` 0.0.6 is still `latest`, SLSA v1 provenance
   present; tag `v0.0.6` = `83dbf25`; no code change on `main` since). Consumers re-read: access-gate-client 0.0.9 (released
   2026-10-10) still generates `deployments.ts` from the exact pin `0.0.6`; docs and dev at `^0.0.6`. No finding or Section D box changes.
+- 2026-10-19 — dependency-bot status checked (read-only): `.github/dependabot.yml` carries the `ignore` rules and the repository has no open Dependabot pull requests (`gh pr list`, 2026-10-19). Versions, findings and gates were not re-examined in this pass.
+  - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
 
 ## Pre-save consistency checklist (this pass)
 
