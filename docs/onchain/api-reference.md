@@ -27,7 +27,7 @@ Testnet package `0xd7ddaa94b74330979b2b618fc81206d160a264f1c9ca148a77fa214430138
 
 `init` (on publish) creates `Publisher`, `Display<AccessNFT>`, `Display<SoulboundAccessNFT>` and
 `PlatformAdminCap` for the publisher, and shares `PlatformConfig { treasury: publisher,
-commission_bps: 20, min_commission_mist: 1_000_000, free_gate_fee_mist: 100_000_000 }`.
+commission_bps: 20, min_commission_mist: 500_000, free_gate_fee_mist: 1_000_000_000 }`.
 
 ## Commission and fees
 
@@ -37,7 +37,7 @@ commission_bps: 20, min_commission_mist: 1_000_000, free_gate_fee_mist: 100_000_
   live `PlatformConfig` (`effective_commission_terms`).
 - **Minimum paid price** (`min_paid_price_mist`): `⌈min_commission_mist × 10⌉`, at least 1 MIST —
   the lowest price at which the commission floor fits under the 10% cap. With the defaults: 0.2%,
-  never less than 0.001 SUI, so the minimum paid price is 0.01 SUI.
+  never less than 0.0005 SUI, so the minimum paid price is 0.005 SUI.
 - **Free gates** pay `free_gate_fee_mist` once — at `create_free_gate`, or at `make_gate_free` for a
   gate created paid. After that the gate may move freely between 0 and a paid price; paid purchases
   always carry the commission, and airdrops pay it too, so no price change or grant avoids it.

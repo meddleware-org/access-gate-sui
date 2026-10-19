@@ -202,11 +202,13 @@ public struct CommissionTerms has copy, drop, store {
 const MAX_COMMISSION_BPS: u64 = 1000;
 /// Basis-point denominator.
 const BPS_DENOMINATOR: u64 = 10000;
-/// `init` defaults: 0.2% commission, never less than 0.001 SUI per paid mint (so the minimum paid
-/// price is 0.01 SUI); 0.1 SUI to make a gate free.
+/// `init` defaults: 0.2% commission, never less than 0.0005 SUI per paid mint (so the minimum paid
+/// price is 0.005 SUI); 1 SUI to make a gate free. They only take effect when the package is published
+/// (the mainnet publish); a live `PlatformConfig` changes only through the `PlatformAdminCap` setters.
+/// Sized by the workspace cost model (`docs/economics/COST_MODEL.md`, decision D57, 2026-10-19).
 const DEFAULT_COMMISSION_BPS: u64 = 20;
-const DEFAULT_MIN_COMMISSION_MIST: u64 = 1_000_000;
-const DEFAULT_FREE_GATE_FEE_MIST: u64 = 100_000_000;
+const DEFAULT_MIN_COMMISSION_MIST: u64 = 500_000;
+const DEFAULT_FREE_GATE_FEE_MIST: u64 = 1_000_000_000;
 
 /// Capability authorising updates to `PlatformConfig`.
 /// Transferred to the package publisher in `init`.
@@ -389,8 +391,8 @@ public struct PlatformConfigUpdatedEvent has copy, drop {
 /// - `Publisher` (kept by publisher; required for future Display updates)
 /// - `Display<AccessNFT>` and `Display<SoulboundAccessNFT>` (transferred to publisher)
 /// - `PlatformAdminCap` (transferred to publisher)
-/// - `PlatformConfig` shared object (treasury = publisher; commission 20 bps with a 0.001 SUI
-///   floor; free-gate fee 0.1 SUI)
+/// - `PlatformConfig` shared object (treasury = publisher; commission 20 bps with a 0.0005 SUI
+///   floor; free-gate fee 1 SUI)
 fun init(otw: ACCESS_GATE, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
 

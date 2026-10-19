@@ -454,7 +454,11 @@ The source and test SPDX headers, `LICENSE`, `Move.toml` and `package.json` all 
 **Severity:** Positive
 
 - `PlatformConfig { version: 1, treasury: publisher, commission_bps: 20, min_commission_mist: 1_000_000,
-  free_gate_fee_mist: 100_000_000 }` is shared.
+  free_gate_fee_mist: 100_000_000 }` is shared (the published 0.0.6 source; the live testnet object still
+  holds these values).
+- From 0.0.7 (2026-10-19, OQ16) the source defaults are `min_commission_mist: 500_000` and
+  `free_gate_fee_mist: 1_000_000_000`, taken from the workspace cost model; they take effect only at the
+  mainnet publish. `test_init_creates_platform_objects` pins them.
 - `PlatformAdminCap`, `Publisher` and both `Display`s go to the publisher.
 - Tests: `test_init_creates_platform_objects`, `test_init_and_test_configs_start_at_the_package_version`.
 
@@ -865,6 +869,8 @@ preview and execution aborts rather than overcharging (access-gate-client `ptb.t
 **Remediation / evidence:** The trust assumption is now recorded in `SECURITY.md` ("Platform-authority
 parameters": a multisig before mainnet, no on-chain ceilings, not a defect). Whether to add ceilings
 instead stays with the maintainer (OQ20); the setters are unchanged at `83dbf25` (`:1056`, `:1067`).
+The new defaults (OQ16, 0.0.7) do not change this: the setters stay unbounded, and the cost model's
+re-pricing policy (`docs/economics/COST_MODEL.md` §2) is the documented basis for any future setter call.
 
 ### F43 — The stale audit was published in npm 0.0.5
 
@@ -1087,7 +1093,7 @@ every trusted original-id) still applies.
 | Function | Attacker controls | Confidentiality | Discoverability / UX | Gas / state growth | Mitigation |
 | --- | --- | --- | --- | --- | --- |
 | `create_gate` | every gate field incl. display strings (unbounded) and policy | none | look-alike gates; phishing names and images in wallets | one shared object per call, paid by the attacker; price ≥ the minimum makes nothing free | UIs list gates by `AdminCap` ownership or curated IDs; never trust `nft_name`/`nft_image_url` |
-| `create_free_gate` | same, plus pays the 0.1 SUI fee | none | as above; free passes airdroppable without commission | fee per gate | fee (F27) |
+| `create_free_gate` | same, plus pays the free-gate fee (default 1 SUI from 0.0.7; 0.1 SUI on the live testnet object) | none | as above; free passes airdroppable without commission | fee per gate | fee (F27) |
 | `purchase` | payment coin size | none | — | one NFT per call, paid by the buyer | clients split the exact price (access-gate-client); no on-chain price ceiling (F42 note) |
 | `consume*` / `burn*` | own NFTs; nonce bytes (≥ 8, unbounded) | none | spam `AccessConsumedEvent`s for own passes | events paid by the caller | verifiers bind digest + sender + gate (F34); S2 nonce cap |
 | Views | — | none | — | — | — |
@@ -1410,6 +1416,11 @@ tests, against the real contract (not a self-compared vector).
     optional and independent — `pause_blocks_access`, F29.)**
 16. **OQ16** Are the default platform terms right for Meddleware's deployment: 0.2%, a 0.001 SUI floor
     (minimum paid price 0.01 SUI) and a 0.1 SUI free-gate fee?
+    **(Decided 2026-10-19: 0.2% stays; the floor becomes 0.0005 SUI (minimum paid price 0.005 SUI) and the
+    free-gate fee 1 SUI. Evidence: the workspace cost model `docs/economics/COST_MODEL.md` (decision D57) — the
+    floor is at most 20% of a buyer's unavoidable purchase gas on mainnet (0.00442 SUI), the free-gate fee is a
+    value action of about US$1. Source defaults changed in 0.0.7; the live testnet `PlatformConfig` is changed
+    by the maintainer through `set_min_commission_mist` / `set_free_gate_fee_mist`.)**
 17. **OQ17** Which consume binding is canonical?
     - (a) Digest-first redemption: digest + event `sender`/`consumer` + `gate_id`, single use by
       redemption store. This is the gateways today.
@@ -1529,6 +1540,13 @@ tests, against the real contract (not a self-compared vector).
   2026-10-10) still generates `deployments.ts` from the exact pin `0.0.6`; docs and dev at `^0.0.6`. No finding or Section D box changes.
 - 2026-10-19 — dependency-bot status checked (read-only): `.github/dependabot.yml` carries the `ignore` rules and the repository has no open Dependabot pull requests (`gh pr list`, 2026-10-19). Versions, findings and gates were not re-examined in this pass.
   - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
+- 2026-10-19 — OQ16 decided from the workspace cost model (`docs/economics/COST_MODEL.md`, D57): source defaults
+  `DEFAULT_MIN_COMMISSION_MIST` 1_000_000 → 500_000 and `DEFAULT_FREE_GATE_FEE_MIST` 100_000_000 → 1_000_000_000
+  (`DEFAULT_COMMISSION_BPS` stays 20), with a comment that they apply at the mainnet publish; F22 and the F42
+  note updated; on-chain docs and README amounts updated. Version 0.0.7 (`Move.toml`, `package.json`), commit
+  pending. Measured: `sui move build --lint --warnings-are-errors` clean, `sui move test` 94/94
+  (`test_init_creates_platform_objects` pins the new defaults). Not republished: the testnet `PlatformConfig`
+  keeps 1_000_000 / 100_000_000 until the maintainer sends the setters. No disposition changes.
 
 ## Pre-save consistency checklist (this pass)
 
@@ -1541,7 +1559,7 @@ tests, against the real contract (not a self-compared vector).
   (`check-template-dates.mjs` passes).
 - [x] Closing structure in order; normative items numbered sequentially.
 - [x] Open questions: none deleted or renumbered; decisions use `(Decided YYYY-MM-DD: …)`; OQ3, OQ6,
-  OQ8, OQ9, OQ12, OQ16, OQ20, OQ21 stay open.
+  OQ8, OQ9, OQ12, OQ20, OQ21 stay open (OQ16 decided 2026-10-19).
 - [x] Section D ↔ dispositions — unticked items are mainnet-blocked or maintainer-only and say which.
 - [x] Executive summary reflects the current dispositions.
 - [x] Counts and versions re-measured 2026-10-09 (tests 94, coverage 100.00%, CLI 1.81.0, npm 0.0.6 / 15

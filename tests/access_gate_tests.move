@@ -744,9 +744,11 @@ fun test_init_creates_platform_objects() {
     let platform = s.take_shared<PlatformConfig>();
     assert!(platform.platform_commission_bps() == 20, 0);
     assert!(platform.platform_treasury() == CREATOR, 1);
-    assert!(platform.platform_min_commission_mist() == 1_000_000, 7);
-    assert!(platform.platform_free_gate_fee_mist() == 100_000_000, 8);
-    assert!(access_gate::min_paid_price_mist(&platform) == 10_000_000, 9);
+    // Defaults from the cost model (docs/economics/COST_MODEL.md, D57): 0.0005 SUI floor → 0.005 SUI
+    // minimum paid price; 1 SUI free-gate fee.
+    assert!(platform.platform_min_commission_mist() == 500_000, 7);
+    assert!(platform.platform_free_gate_fee_mist() == 1_000_000_000, 8);
+    assert!(access_gate::min_paid_price_mist(&platform) == 5_000_000, 9);
     ts::return_shared(platform);
 
     assert!(s.has_most_recent_for_sender<PlatformAdminCap>(), 2);

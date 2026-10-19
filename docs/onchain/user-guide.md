@@ -30,7 +30,7 @@ Things to know:
 
 | Action | Who can do it |
 | --- | --- |
-| Create a gate (price, recipient, pass flavour, soulbound, auto-burn, NFT name/image/description) | anyone — a paid gate costs at least 0.01 SUI per pass; a free gate pays a one-off platform fee |
+| Create a gate (price, recipient, pass flavour, soulbound, auto-burn, NFT name/image/description) | anyone — a paid gate costs at least 0.005 SUI per pass; a free gate pays a one-off platform fee |
 | Change price, recipient, pause, pass flavour, auto-burn, NFT display defaults | the gate's `AdminCap` holder |
 | Give passes away (airdrop) — free for the recipient; the admin pays the platform commission a sale would carry | the gate's `AdminCap` holder |
 | **Freeze** the gate (make it immutable) | the gate's `AdminCap` holder — irreversible |
@@ -52,7 +52,7 @@ Things to know:
   from being used* (e.g. uploads to the Walrus relay). They can never be changed
   afterwards.
 - **Commission and minimum price.** Each sale pays the platform 0.2% of the price, but at least
-  0.001 SUI and never more than 10% of the price — so a paid pass costs at least 0.01 SUI.
+  0.0005 SUI and never more than 10% of the price — so a paid pass costs at least 0.005 SUI.
 - **Free gates.** Making a gate free (at creation, or later by setting its price to 0) costs a
   one-off platform fee; after that its price can go back and forth between free and paid.
 - Keep your `AdminCap` safe: whoever holds it controls your gate's price and payout address.

@@ -21,8 +21,8 @@ to restrict to holders of a specific NFT. It knows nothing about any particular 
   Replay protection is the verifier's job — see
   [SECURITY.md](SECURITY.md) and [docs/onchain/dev-guide.md](docs/onchain/dev-guide.md).
 - **Platform commission and fees** — a shared `PlatformConfig` routes the commission on every paid
-  mint (0.2% by default, never less than `min_commission_mist` — 0.001 SUI — and never more than 10%
-  of the price) to the platform treasury, and charges a one-off `free_gate_fee_mist` (0.1 SUI) to
+  mint (0.2% by default, never less than `min_commission_mist` — 0.0005 SUI — and never more than 10%
+  of the price) to the platform treasury, and charges a one-off `free_gate_fee_mist` (1 SUI) to
   make a gate free. Airdrops pay the commission too.
 
 ## Quick start

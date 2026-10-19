@@ -33,9 +33,9 @@ particular consumer.
 commission goes to the platform treasury, the rest to the gate's payment recipient, any overpayment
 is refunded, and the pass is minted to the buyer — all in one transaction.
 
-- **Commission:** 0.2% of the price by default, but never less than 0.001 SUI and never more than
-  10% of the price. A paid gate therefore costs at least 0.01 SUI.
-- **Free gates** (price 0) pay a one-off platform fee (0.1 SUI by default) when they are created or
+- **Commission:** 0.2% of the price by default, but never less than 0.0005 SUI and never more than
+  10% of the price. A paid gate therefore costs at least 0.005 SUI.
+- **Free gates** (price 0) pay a one-off platform fee (1 SUI by default) when they are created or
   made free; after that, passes are free to claim.
 - **Airdrops** (passes granted by the gate's admin) pay the same commission a purchase would, so a
   gate cannot sell off-chain and grant on-chain to avoid it.

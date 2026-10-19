@@ -61,7 +61,7 @@ const [policy] = tx.moveCall({
     tx.pure.bool(pauseBlocksDecryption), tx.pure.bool(pauseBlocksAccess),
   ],
 })
-// Paid gate: price must be ≥ min_paid_price_mist(platform) (0.01 SUI by default), else abort 11.
+// Paid gate: price must be ≥ min_paid_price_mist(platform) (0.005 SUI by default), else abort 11.
 tx.moveCall({
   target: `${PKG}::access_gate::create_gate`,
   arguments: [tx.object(PLATFORM_CONFIG_ID), tx.pure.u64(priceMist), /* recipient, uses, soulbound,
