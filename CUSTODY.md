@@ -78,9 +78,19 @@ Signers can work on separate machines: only `tx.b64` and the signatures travel b
 2. Build the upgrade transaction with the multisig as sender
    (`sui client upgrade --upgrade-capability <cap> --sender <multisig> --serialize-unsigned-transaction`)
    and sign it as above.
+   `sui client upgrade` reads the network's protocol configuration: a CLI older than the network's
+   protocol version stops with `protocol version N is newer than the maximum version M supported by this
+   CLI`. Use the current testnet/mainnet CLI for this step (the transaction itself does not depend on the
+   toolchain that published). The serialised upgrade is not recorded anywhere by the CLI, so after executing it
+   set `published-at` and `version` in `Published.toml` to the new package id and version
+   (`original-id` and `upgrade-capability` stay).
 3. Call `migrate(&PlatformAdminCap, &mut PlatformConfig)` from the multisig. Every older version now
    aborts with `E_WRONG_VERSION` on any gated call.
 4. Release the npm package and update consumers to the new `published-at`.
+
+`scripts/make-immutable.sh` accepts the `UpgradeCap` of an upgraded package even while `Published.toml` still
+records the earlier version: the cap names the latest package, and the script checks that package is a later
+version of the recorded one (its `ACCESS_GATE` type originates at the recorded `original-id`).
 
 ## Rehearsal
 
@@ -88,6 +98,13 @@ The whole lifecycle was rehearsed on localnet on 2026-10-01: publish, a 1-of-2 m
 keys, transfer of all five objects, then a burn signed by one member and executed through
 `execute-signed-tx`. Repeat it with `sui start --with-faucet --force-regenesis` and a separate
 `SUI_CONFIG_DIR` so the real client configuration is untouched.
+
+It was rehearsed once on **testnet** on 2026-10-22, on a scratch publication (never the live package) with a
+separate `SUI_CONFIG_DIR`, a 2-of-2 multisig of two throwaway keys and these scripts: `publish.sh testnet
+--create-gate`, `multisig-address.sh`, `transfer-platform-authority.sh --include-upgrade-cap`, an upgrade to
+`VERSION = 2` signed by both members, `migrate` signed by both (the old `published-at` then aborted
+`E_WRONG_VERSION` = 13 on `purchase`, the new one succeeded), then `make-immutable.sh` and the two signatures
+(`UpgradeCap` gone). The audit (OQ21, C.2, S4) has the digests.
 
 ## Current state
 

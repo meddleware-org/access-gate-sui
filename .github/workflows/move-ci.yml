@@ -50,4 +50,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # shellcheck is preinstalled on the GitHub-hosted Ubuntu runners.
       - name: shellcheck
-        run: shellcheck -x -P SCRIPTDIR scripts/*.sh
+        run: shellcheck -x -P SCRIPTDIR scripts/*.sh tests/scripts/*.sh
+
+      - name: Offline script tests
+        run: bash tests/scripts/make_immutable_test.sh

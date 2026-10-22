@@ -109,8 +109,20 @@ typ="$(jq -r '.objType // empty' <<<"$json")"
 owner="$(jq -r '.owner.AddressOwner // empty' <<<"$json")"
 cap_pkg="$(jq -r '.content.package // empty' <<<"$json")"
 [ "$typ" = "$UPGRADE_CAP_TYPE" ] || { log "ERROR: $UPGRADE_CAP_ID is a '$typ', not an UpgradeCap."; exit 1; }
-[ "$(long_addr "$cap_pkg")" = "$(long_addr "$PACKAGE_ID")" ] \
-  || { log "ERROR: UpgradeCap $UPGRADE_CAP_ID controls package $cap_pkg, not $PACKAGE_LABEL $PACKAGE_ID."; exit 1; }
+# After an upgrade the cap names the LATEST package, while Published.toml still records the version this
+# checkout was published at when the upgrade was signed as a multisig transaction (CUSTODY.md: the CLI only
+# serialises it). So accept the cap when it names $PACKAGE_ID, or a later version of the same package: the
+# package it names was first published at the original id (its own `ACCESS_GATE` one-time witness type
+# originates there).
+if [ "$(long_addr "$cap_pkg")" != "$(long_addr "$PACKAGE_ID")" ]; then
+  ORIGINAL_ID="$(published_field original-id 2>/dev/null || true)"
+  ORIGINAL_ID="${ORIGINAL_ID:-$PACKAGE_ID}"
+  cap_origin="$(sui client object "$cap_pkg" --json 2>/dev/null \
+    | jq -r '[.content.Package.type_origin_table[]? | select(.module_name == "access_gate" and .datatype_name == "ACCESS_GATE") | .package][0] // empty' 2>/dev/null || true)"
+  [ -n "$cap_origin" ] && [ "$(long_addr "$cap_origin")" = "$(long_addr "$ORIGINAL_ID")" ] \
+    || { log "ERROR: UpgradeCap $UPGRADE_CAP_ID controls package $cap_pkg, which is not $PACKAGE_LABEL $PACKAGE_ID or a later version of it (original id $ORIGINAL_ID)."; exit 1; }
+  log "UpgradeCap names $cap_pkg, a later version of $PACKAGE_LABEL $ORIGINAL_ID (Published.toml still records $PACKAGE_ID)."
+fi
 [ -n "$owner" ] || { log "ERROR: UpgradeCap $UPGRADE_CAP_ID is not owned by an address."; exit 1; }
 active="$(sui client active-address)"
 if [ "$(long_addr "$owner")" = "$(long_addr "$active")" ]; then mode="direct"; else mode="multisig"; fi
