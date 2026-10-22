@@ -110,7 +110,7 @@ immutable. This pass re-verified every finding against that code:
   check the expected signer and the balance, verify the burn, and re-read ownership after a transfer.
 - **F44** — the `sui` binary is checksum-pinned, and CI builds with lints as errors.
 
-**Dispositions (48 findings):** RESOLVED 33 · Positive 7 · ADJUDICATED 3 · MITIGATED 1 · ACCEPTED-RISK 2 ·
+**Dispositions (49 findings):** RESOLVED 34 · Positive 7 · ADJUDICATED 3 · MITIGATED 1 · ACCEPTED-RISK 2 ·
 DEFERRED 2 (F2, F3, mainnet-blocked).
 
 **Open items, most important first (both mainnet-blocked):**
@@ -990,6 +990,27 @@ upgradeable cap, and the old cap was burned. For mainnet the lifecycle in `CUSTO
 upgradeable window open for exactly this reason. The B.3 versioning guidance for integrators (subscribe to
 every trusted original-id) still applies.
 
+### F49 — `make-immutable.sh` refused the UpgradeCap of an upgraded package (found by the 2026-10-22 testnet rehearsal)
+
+**Severity:** Low   **Disposition:** RESOLVED (0.0.8, commit pending: the script accepts a later version of the recorded package; `tests/scripts/make_immutable_test.sh`; `CUSTODY.md` upgrade steps)
+**Where:** `scripts/make-immutable.sh` (the cap's package against the recorded `published-at`); `CUSTODY.md` "Upgrading during the verification window".
+
+**Issue:** after an upgrade the `UpgradeCap` names the LATEST package. `CUSTODY.md` signs the upgrade as a multisig transaction
+(`sui client upgrade --serialize-unsigned-transaction`), which the CLI does not record, so `Published.toml` still named the version this
+checkout was published at, and the script stopped with "UpgradeCap … controls package `0x12d5…`, not access_gate `0x47fd…`" at the very
+step the verification window exists for (the burn after an upgrade). Found on the testnet rehearsal below. A second trap, from the same
+run: `sui client upgrade` on the pinned CLI 1.81.0 stops with `protocol version 139 is newer than the maximum version 138 supported by
+this CLI` once the network's protocol version outgrows the CLI that published; a CLI of the current testnet line (1.82.2) built it.
+
+**Impact:** the burn (and so the whole B.3 sequence) would have failed at a moment of the maintainer's choosing, on mainnet; fail-closed, no
+funds at risk. The workaround was to hand-edit `Published.toml`, which `CUSTODY.md` did not say.
+
+**Remediation / evidence:** the script accepts the cap when it names the recorded package or a later version of it: the package it names
+must have its `ACCESS_GATE` one-time-witness type originate at the recorded `original-id` (read from the package's `type_origin_table`);
+any other package is refused. `CUSTODY.md` now tells the operator to use the current CLI for the upgrade step and to record the new
+`published-at` and `version` in `Published.toml`. Tests: `tests/scripts/make_immutable_test.sh` (5 cases, a stub `sui`; 4 of them fail
+on the previous script), run with shellcheck in `move-ci.yml`. Real-chain proof: the rehearsal below, burn `Eui26pAVBmeicw9P9chig8eqzR1jrDHnPi7iewK1p1Zo`.
+
 ---
 
 ## Section A — Invariant verification matrix
@@ -1223,7 +1244,7 @@ tests, against the real contract (not a self-compared vector).
 | --- | --- | --- | --- |
 | All accounting, consume, freeze and version logic | yes | — | `tests/access_gate_tests.move` |
 | `publish.sh` (incl. `--create-gate`), `transfer-platform-authority.sh`, `make-immutable.sh` (direct + multisig) | no | localnet | runs 2026-09-28/30; full custody rehearsal 2026-10-01 (`CUSTODY.md`); not re-run this pass; the 2026-10-09 testnet republish (`publish.sh --replace-published`, record `7906954`) and the cap burn are real-chain evidence (burn read on-chain; the script used for the burn is not recorded) |
-| Upgrade + `migrate` on a real chain (old `published-at` aborts afterwards) | unit only (`set_platform_version_for_testing`) | localnet rehearsal before the first real upgrade (mainnet-blocked: needs the `CUSTODY.md` window; S4) | S4 |
+| Upgrade + `migrate` on a real chain (old `published-at` aborts afterwards) | unit only (`set_platform_version_for_testing`) | **testnet, scratch publication, 2026-10-22** (v1 → v2 signed by a 2-of-2 multisig, `migrate`, old `published-at` aborts `E_WRONG_VERSION` = 13; log entry). The first upgrade of a MAINNET publication inside the `CUSTODY.md` window is still ahead | S4 |
 | Wallet `Display` rendering; wallets refusing a soulbound transfer | no | testnet smoke | manual |
 | Cross-package linkage (`seal_policies` → `is_valid_for*`) | `is_valid_for*` itself is unit-tested (F37) | seal-policies tests (41, linking `0xd7ddaa94…`) + testnet decrypt round trip | seal-policies audit |
 | Verifier replay discipline | no | nft-gate suites; live paywall e2e PASS 2026-10-09 (pass bought on gate `0x316f1bf9…`, consumed, `nft-gate:access:v2` proof) | F34 |
@@ -1260,10 +1281,10 @@ tests, against the real contract (not a self-compared vector).
 
 - [ ] **B.3 policy executed on mainnet:** `CUSTODY.md` transfer → verification window → multisig burn — **blocking** (F3, OQ1; maintainer: `OPERATOR_TASKS.md` "Mainnet release custody")
 - [ ] **privileged caps** (`PlatformAdminCap` / `Publisher` / `Display`) at the multisig — **blocking** (F2, OQ2; same item)
-- [ ] the custody lifecycle exercised once on a real chain (testnet) — OQ21 (decided 2026-10-22: on a scratch testnet publication, not the live cap; maintainer runs it; rehearsed on localnet 2026-10-01)
+- [x] the custody lifecycle exercised once on a real chain (testnet) — OQ21: run 2026-10-22 on a scratch testnet publication (not the live cap) with a 2-of-2 multisig of two throwaway keys: publish `8mzSBRPQtwYAsuQsWyk5KQPFDXmXjRzb939jiBSPZG62`, transfer of all five authority objects (`FRjnKWTL…Ek9M`, `CVd56mj1…R1X9V`, `9zis5HSu…CXJ`, `8XDyM9EH…z4N`, `ErzPAj46…jtnRsE`), `plannedBurnDate` set, multisig upgrade + `migrate`, multisig burn `Eui26pAVBmeicw9P9chig8eqzR1jrDHnPi7iewK1p1Zo` (UpgradeCap gone); full ids in the log entry. The live caps were not touched
 - [ ] full Section A coverage with no GAP — only I11 remains (F3, mainnet-blocked)
 - [x] abort-code map published (`docs/onchain/api-reference.md`, C.1)
-- [ ] live-only paths (C.2) exercised on testnet, including an upgrade + `migrate` — mainnet-blocked: needs the first real upgrade inside the `CUSTODY.md` window (S4)
+- [x] live-only paths (C.2) exercised on testnet, including an upgrade + `migrate` — 2026-10-22 on the scratch publication: upgrade `E1jsVrjMhMRFGLwwhJrTGbKaDDxV47aDNWGcXGCuwEZW` (v2 `0x12d50145…c5af`), `migrate` `BEMeJ7oCX2SzvYfn3gmcsaKLxYU8YQdMcYcWD9rfrYLr` (`PlatformMigratedEvent` 1 → 2); a `purchase` dry run against the old `published-at` aborts 13 (`check_version`) after it and succeeds against the new one. Before `migrate`: v1 succeeds, v2 aborts 13. S4's localnet script is still a suggestion
 - [x] mainnet double guards in place; skipped runs never report success — F45
 - [x] runbook links every script with dry-run and recovery commands, including `SECURITY.md` scope — F39, B.OPS-1
 - [ ] external audit — maintainer / mainnet item
@@ -1369,6 +1390,8 @@ tests, against the real contract (not a self-compared vector).
   split.
 - **S4** SHOULD add a localnet script exercising publish → create gate → purchase → consume →
   **upgrade with `VERSION` bumped → `migrate` → old `published-at` aborts**, run before every release.
+  [Run by hand on testnet on 2026-10-22 (log entry), through the real scripts and a 2-of-2 multisig; it found F49. Not scripted: the
+  steps need the current CLI, three signatures and a funded scratch key, so they stay a rehearsal before each full release.]
 - **S5** MAY bound gate display strings (name ≤ 64, URL ≤ 512, description ≤ 1024 bytes) to limit
   wallet-phishing payloads and event size (B.4).
 - **S6** SHOULD add a docs CI check comparing dev-site `moveCall` snippets with the compiled ABI (F38).
@@ -1445,7 +1468,7 @@ tests, against the real contract (not a self-compared vector).
 21. **OQ21** Should the testnet `0xd7ddaa94…` publication (formerly `0xa55789…`) run the `CUSTODY.md` lifecycle now
     (multisig, planned burn), so the process is proven on a real chain before mainnet, or does
     testnet stay with the deploy key until mainnet? (`SECURITY.md` currently says the latter.) See F3.
-    *(Decided 2026-10-22: rehearse the lifecycle on a scratch testnet publication, not on the live cap. The live `0xd7ddaa94…` caps stay with the deploy key until mainnet (an irreversible burn there would remove the upgrade path the testnet needs); the real-chain rehearsal — transfer, verification window, upgrade plus `migrate`, multisig burn — runs on a throwaway publication whose caps can be burned freely. The Section D box stays open until that rehearsal has run.)*
+    *(Decided 2026-10-22: rehearse the lifecycle on a scratch testnet publication, not on the live cap. The live `0xd7ddaa94…` caps stay with the deploy key until mainnet (an irreversible burn there would remove the upgrade path the testnet needs); the real-chain rehearsal — transfer, verification window, upgrade plus `migrate`, multisig burn — runs on a throwaway publication whose caps can be burned freely. The Section D box stays open until that rehearsal has run.)* **Run 2026-10-22** (Section D, log entry): the lifecycle works as `CUSTODY.md` describes except for F49.
 
 ## Risks (residual)
 
@@ -1555,6 +1578,18 @@ tests, against the real contract (not a self-compared vector).
   - **Decided 2026-10-22:** OQ21 (rehearse custody on a scratch testnet publication, not the live cap), OQ8 (protect release tags with a tag ruleset), OQ6 (per-gate metadata copied at mint is canonical, the global `Display` is a passthrough, `Display` and `Publisher` stay with the multisig),
     OQ12 (reject `@0x0` as `payment_recipient` with `E_ZERO_ADDRESS`). OQ12 changes Move code and is recorded as a requirement for the NEXT publish (tests for `create_*` and `set_payment_recipient`, abort-code map and docs updated with it); OQ6 and OQ21 are process rules for that publish and its custody step; OQ8 is a repository setting (maintainer).
   - **F20 and F48 stay ACCEPTED-RISK** (reasons confirmed). Section D: the OQ21 box keeps its place and now names the decided method. Release status: `0.0.7` is tagged (`v0.0.7` = `bf23517`; D57 fee defaults, source only: the testnet publication is still 0.0.6). No code was changed or run in this pass.
+- 2026-10-22 (testnet rehearsal on a scratch publication; scripts fixed, 0.0.8 local commit, not released) — OQ21 and C.2, S4 run on a real chain.
+  - **Setup:** an isolated `SUI_CONFIG_DIR` holding only the maintenance runner's testnet key and two throwaway keys; a copy of this checkout with `Published.toml` and `deployments.json` emptied (the live package `0xd7ddaa94…` and its caps were not touched); sui 1.81.0 for the scripts, 1.82.2 (release `testnet-v1.82.2`, run from a scratch directory, nothing installed) for `sui client upgrade`.
+  - **Publish:** `scripts/publish.sh testnet --create-gate` (paid gate, 0.005 SUI, soulbound, 1 use): package `0x47fdd6f8a0d33186d6714361fed5c59bc3d3dff19411c57e5a0f5e04faed11ce` (tx `8mzSBRPQtwYAsuQsWyk5KQPFDXmXjRzb939jiBSPZG62`), `PlatformConfig` `0xe9ab0a59…e5c1`, gate `0xf649f0ca…afc2`.
+  - **Multisig:** `scripts/multisig-address.sh` (threshold 2, weights 1 1, keys `0xb674a708…e3c` and `0xbe210acd…4182`) gave `0x447853c8de49efc0d344a54bad230fab16f9b3975110af8671364b223ae33ea9`; it was funded with 0.15 SUI (`AdtHnSMUtqcdFCzDs7eVbq3R973ewkdUBR2B7SbH35aR`).
+  - **Transfer:** `transfer-platform-authority.sh --include-upgrade-cap` (dry run first; `YES` and `UPGRADECAP`): PlatformAdminCap `FRjnKWTLtTTSPFpiYqBjKazgZ18H3KrSh5gBDvqqEk9M`, Publisher `CVd56mj1viRVVnZHAAhHnXqXitjpZcWrqMFWRiZR1X9V`, Display<AccessNFT> `9zis5HSuQCPayHdNA3svfR1bpGuZ1fAwBUHQiHDtCGXJ`, Display<SoulboundAccessNFT> `8XDyM9EHU1No91QumsSAqLBAKJWjMMz7wrKjG9bjoz4N`, UpgradeCap `ErzPAj46wEN7EcTW38bh2iB7dewWdpQgDrQzbnjmtRsE`; each re-read as owned by the multisig; `deployments.json` recorded it; `plannedBurnDate` set by hand.
+  - **Upgrade:** `VERSION` 1 → 2; `sui client upgrade --sender <multisig> --serialize-unsigned-transaction` failed on CLI 1.81.0 (`protocol version 139 is newer than the maximum version 138 supported by this CLI`, F49) and built on 1.82.2; both members signed, `multi-sig-combine-partial-sig`, `execute-signed-tx`: tx `E1jsVrjMhMRFGLwwhJrTGbKaDDxV47aDNWGcXGCuwEZW`, v2 package `0x12d5014537b14b567e6deb8ecfe255a841d78bb39573dc5ae2cc33e5f669c5af` (cost the multisig 0.0732 SUI). Before `migrate`: `purchase` dry run on v1 succeeds, on v2 aborts 13.
+  - **`migrate`:** `sui client ptb --move-call <v2>::access_gate::migrate` as the multisig, signed by both: `BEMeJ7oCX2SzvYfn3gmcsaKLxYU8YQdMcYcWD9rfrYLr`, `PlatformMigratedEvent { from_version: 1, to_version: 2 }`. After it: `purchase` on the old published-at aborts 13 in `check_version`, on v2 it succeeds.
+  - **Burn:** `make-immutable.sh` refused at first (F49); with the fix, `DRY_RUN=0` wrote the unsigned transaction and both signatures executed it: `Eui26pAVBmeicw9P9chig8eqzR1jrDHnPi7iewK1p1Zo` (deleted object `0x2::package::UpgradeCap`; a read of the cap returns "not found").
+  - **After the burn (v2, immutable):** a multisig-signed `set_free_gate_fee_mist` (`HsFd7wypsce34vKWeozUzK1ttrXNsVK94UereKRKvUPT`, `PlatformConfigUpdatedEvent`), then `make_gate_free` `3cJb3jJ9H7wo6Ff525F49m5nmkmddBAQNCxdX9e7XKLe`, a free purchase `AkuTybQC252jTgQ3jRvX8t6gr9c3N2mHvg19iUoFo9aR`, consume `AtfomeiPyh7HSb69ReK6hX32CZR5DJ985ApN6w5DDd1j` and `make_gate_immutable` `3YxU2MnRT1Ed4bvwrHCmPep2knMviConQtn6yYWZxeCC`: the platform authority works from the multisig after the cap is gone, and the gate lifecycle events these produce fed the sui-indexer F24 parity check (kinds `GateMadeFree`, `PlatformConfigUpdated`, `PlatformMigrated`).
+  - **Fixed (F49, 0.0.8, commit pending):** `scripts/make-immutable.sh`, `tests/scripts/make_immutable_test.sh` (new, 5 cases; 4 fail on the old script; shellcheck clean), `move-ci.yml` (shellcheck over `tests/scripts` and the test), `CUSTODY.md` (current CLI for the upgrade, record the new `published-at`, the testnet rehearsal). `sui move test` 94/94 unchanged.
+  - **Dispositions (49 findings):** RESOLVED 34 (adds F49), Positive 7, ADJUDICATED 3, MITIGATED 1, ACCEPTED-RISK 2, DEFERRED 2 (F2, F3, mainnet-blocked). Section D: the OQ21 box and the C.2 box are ticked; the mainnet boxes are unchanged. Cost to the runner: about 0.15 SUI to the multisig (a throwaway address) and 0.03 SUI of fees.
+  - **Not exercised:** a mainnet publication; the live `0xd7ddaa94…` caps (deliberately); `transfer-platform-authority.sh` without `--include-upgrade-cap`; a threshold below the number of members (the rehearsal used 2-of-2).
 
 ## Pre-save consistency checklist (this pass)
 
@@ -1574,3 +1609,4 @@ tests, against the real contract (not a self-compared vector).
   files, IDs read on-chain).
 - [x] Re-verification log entry added.
 - [x] 2026-10-22 (close-out): OQ6, OQ8, OQ12 and OQ21 carry their decisions; F20 and F48 confirmed; log entry added; no counts change.
+- [x] 2026-10-22 (testnet rehearsal): F49 added (RESOLVED); the OQ21 and C.2 Section D boxes ticked with digests; counts 49 findings (RESOLVED 34); log entry added.
