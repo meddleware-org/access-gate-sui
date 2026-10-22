@@ -436,7 +436,7 @@ OQ9 remains a maintainer choice; behaviour unchanged at `83dbf25`).
 
 ### F20 — Setters emit no events
 
-**Severity:** Info   **Disposition:** ACCEPTED-RISK (gate setters); partly superseded
+**Severity:** Info   **Disposition:** ACCEPTED-RISK (gate setters); partly superseded (confirmed ACCEPTED 2026-10-22)
 
 Platform setters now emit `PlatformConfigUpdatedEvent`, `migrate` emits `PlatformMigratedEvent`, and
 `make_gate_free` emits `GateMadeFreeEvent`. The gate setters (price, recipient, pause, uses,
@@ -973,7 +973,7 @@ committed update configuration covered the npm lockfile or the pinned Action SHA
 ### F48 — The 2026-10-09 republish orphans gates and passes on the superseded package
 
 **Severity:** Info   **Disposition:** ACCEPTED-RISK (testnet only; pre-v0.2 policy prefers a fresh package
-to compatibility shims)
+to compatibility shims; confirmed ACCEPTED 2026-10-22)
 **Where:** `0xa55789…` (immutable) and its relay gate `0xfd6c3b…`; `nft-gate/gateway-workers/wrangler.toml`
 (`NFT_TYPE`, `GATE_ID`, `0xd7ddaa94…` / `0x316f1bf9…`).
 
@@ -1260,7 +1260,7 @@ tests, against the real contract (not a self-compared vector).
 
 - [ ] **B.3 policy executed on mainnet:** `CUSTODY.md` transfer → verification window → multisig burn — **blocking** (F3, OQ1; maintainer: `OPERATOR_TASKS.md` "Mainnet release custody")
 - [ ] **privileged caps** (`PlatformAdminCap` / `Publisher` / `Display`) at the multisig — **blocking** (F2, OQ2; same item)
-- [ ] the custody lifecycle exercised once on a real chain (testnet) — OQ21 (maintainer choice; rehearsed on localnet 2026-10-01)
+- [ ] the custody lifecycle exercised once on a real chain (testnet) — OQ21 (decided 2026-10-22: on a scratch testnet publication, not the live cap; maintainer runs it; rehearsed on localnet 2026-10-01)
 - [ ] full Section A coverage with no GAP — only I11 remains (F3, mainnet-blocked)
 - [x] abort-code map published (`docs/onchain/api-reference.md`, C.1)
 - [ ] live-only paths (C.2) exercised on testnet, including an upgrade + `migrate` — mainnet-blocked: needs the first real upgrade inside the `CUSTODY.md` window (S4)
@@ -1397,17 +1397,20 @@ tests, against the real contract (not a self-compared vector).
    configurable via `freeze_requires_unpaused` — see F19, F24.)** The combination hazard is OQ19.
 6. **OQ6** Is per-gate metadata (copied at mint) the source of truth with the global `Display` a
    passthrough, and who may change the `Display` templates?
+   *(Decided 2026-10-22: yes. The per-gate metadata copied onto the pass at mint is canonical; the global `Display` is a passthrough of those fields; the `Display` and the `Publisher` stay with the multisig, so only the `PlatformAdminCap` authority can change a template. No code change; this is a requirement for the next publish and its custody step.)*
 7. **OQ7** Which testnet package is canonical? **(Decided 2026-09-28: `0x0bedd0…`, republish once the
    off-chain changes are in — see F14.)** *(Superseded 2026-10-02 by the version-gated publish:
    `0xa55789…`; superseded again 2026-10-09 by the 0.0.6 republish: `0xd7ddaa94…` per `Published.toml`.)*
 8. **OQ8** Tag hygiene: will release tags be immutable (never moved), for example via tag protection?
    *(2026-10-03: tags `v0.0.1`–`v0.0.5` are now on the remote in chronological order; 2026-10-09: `v0.0.6` → `83dbf25` added. Tag protection is a maintainer setting, F15.)*
+   *(Decided 2026-10-22: protect release tags with a tag ruleset (no update, no deletion of `v*`), so a published version's tag cannot move. A repository setting, applied by the maintainer; not a code change.)*
 9. **OQ9** Should `auto_burn_at_zero` be snapshotted per NFT at mint instead of read at consume time?
 10. **OQ10** Which licence applies? **(Decided 2026-09-28: 0BSD — see F21.)**
 11. **OQ11** Dust pricing: enforce a minimum price, or accept? **(Decided 2026-09-28:
     operator-configurable at the tool layer, later enforced on-chain by F26 — see F25, F26.)**
 12. **OQ12** Should `create_*` / `set_payment_recipient` reject `@0x0` as the gate's
     `payment_recipient`?
+    *(Decided 2026-10-22: yes — reject `@0x0` with `E_ZERO_ADDRESS` in both. A payment to `@0x0` is irrecoverable and never intended. This changes Move code, so it is a requirement for the NEXT publish (with a test for each entry point and the abort-code map updated); the source is not edited in this pass.)*
 13. **OQ13** Burn the stray packages' UpgradeCaps? **(Decided 2026-09-28: yes — done, with every other
     stray and superseded cap — see F31.)**
 14. **OQ14** Should Meddleware's deployment allow free (price 0) gates? **(Decided 2026-09-28: yes, if
@@ -1442,6 +1445,7 @@ tests, against the real contract (not a self-compared vector).
 21. **OQ21** Should the testnet `0xd7ddaa94…` publication (formerly `0xa55789…`) run the `CUSTODY.md` lifecycle now
     (multisig, planned burn), so the process is proven on a real chain before mainnet, or does
     testnet stay with the deploy key until mainnet? (`SECURITY.md` currently says the latter.) See F3.
+    *(Decided 2026-10-22: rehearse the lifecycle on a scratch testnet publication, not on the live cap. The live `0xd7ddaa94…` caps stay with the deploy key until mainnet (an irreversible burn there would remove the upgrade path the testnet needs); the real-chain rehearsal — transfer, verification window, upgrade plus `migrate`, multisig burn — runs on a throwaway publication whose caps can be burned freely. The Section D box stays open until that rehearsal has run.)*
 
 ## Risks (residual)
 
@@ -1543,10 +1547,14 @@ tests, against the real contract (not a self-compared vector).
 - 2026-10-19 — OQ16 decided from the workspace cost model (`docs/economics/COST_MODEL.md`, D57): source defaults
   `DEFAULT_MIN_COMMISSION_MIST` 1_000_000 → 500_000 and `DEFAULT_FREE_GATE_FEE_MIST` 100_000_000 → 1_000_000_000
   (`DEFAULT_COMMISSION_BPS` stays 20), with a comment that they apply at the mainnet publish; F22 and the F42
-  note updated; on-chain docs and README amounts updated. Version 0.0.7 (`Move.toml`, `package.json`), commit
-  pending. Measured: `sui move build --lint --warnings-are-errors` clean, `sui move test` 94/94
+  note updated; on-chain docs and README amounts updated. Version 0.0.7 (`Move.toml`, `package.json`), released as tag `v0.0.7` = `bf23517`. Measured: `sui move build --lint --warnings-are-errors` clean, `sui move test` 94/94
   (`test_init_creates_platform_objects` pins the new defaults). Not republished: the testnet `PlatformConfig`
   keeps 1_000_000 / 100_000_000 until the maintainer sends the setters. No disposition changes.
+
+- 2026-10-22 (audit close-out) — open questions decided; no Move source change.
+  - **Decided 2026-10-22:** OQ21 (rehearse custody on a scratch testnet publication, not the live cap), OQ8 (protect release tags with a tag ruleset), OQ6 (per-gate metadata copied at mint is canonical, the global `Display` is a passthrough, `Display` and `Publisher` stay with the multisig),
+    OQ12 (reject `@0x0` as `payment_recipient` with `E_ZERO_ADDRESS`). OQ12 changes Move code and is recorded as a requirement for the NEXT publish (tests for `create_*` and `set_payment_recipient`, abort-code map and docs updated with it); OQ6 and OQ21 are process rules for that publish and its custody step; OQ8 is a repository setting (maintainer).
+  - **F20 and F48 stay ACCEPTED-RISK** (reasons confirmed). Section D: the OQ21 box keeps its place and now names the decided method. Release status: `0.0.7` is tagged (`v0.0.7` = `bf23517`; D57 fee defaults, source only: the testnet publication is still 0.0.6). No code was changed or run in this pass.
 
 ## Pre-save consistency checklist (this pass)
 
@@ -1565,3 +1573,4 @@ tests, against the real contract (not a self-compared vector).
 - [x] Counts and versions re-measured 2026-10-09 (tests 94, coverage 100.00%, CLI 1.81.0, npm 0.0.6 / 15
   files, IDs read on-chain).
 - [x] Re-verification log entry added.
+- [x] 2026-10-22 (close-out): OQ6, OQ8, OQ12 and OQ21 carry their decisions; F20 and F48 confirmed; log entry added; no counts change.
