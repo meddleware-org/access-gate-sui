@@ -26,7 +26,7 @@
 `PlatformConfig` (testnet, current) is `0x3f81489df58233d96798f34ad44de325e1b4df7e4d615affe72ca181969ee7b5`.
 The live Walrus relay gate is `0x316f1bf9764db352e925bb598aff44ea77be4ab652f0bd2eb3fdcc0a378faddc`, a
 `0xd7ddaa94…::access_gate::Gate` (soulbound, 10 uses, 0.01 SUI, all policy flags `false`; admin cap
-`0x8e51e9f1…5b78`) created 2026-10-09, per `nft-gate/gateway-workers/wrangler.toml` and a live GraphQL
+`0x8e51e9f1…5b78`) created 2026-10-09, per `access-gate-gateway/gateway-workers/wrangler.toml` and a live GraphQL
 read. The earlier relay gates `0xfd6c3b…b8a6` (on `0xa55789…`), `0xcb8206…5f50` (on `0x1a81ca…`) and
 `0x0485…` (on `0x0bedd0…`) are superseded.
 npm `@meddleware/access-gate-sui` 0.0.6 was published 2026-10-09T12:45Z (tag `v0.0.6` → `83dbf25`); 0.0.5
@@ -203,10 +203,10 @@ Critical / High / Medium / Low / Info / Positive.
 
 **Cross-repo evidence (read-only):**
 
-- `seal-policies-sui` `Move.toml`/`Move.lock` (pins `790695489fc4`)
+- `sealed-storage-sui` `Move.toml`/`Move.lock` (pins `790695489fc4`)
 - `@meddleware/access-gate-client` `src/deployments.ts` (generated from access-gate-sui 0.0.6) and
   `src/ptb.ts` (exact payment splits)
-- `nft-gate/gateway-workers/wrangler.toml` (`NFT_TYPE`/`GATE_ID`) and both gateways' consume
+- `access-gate-gateway/gateway-workers/wrangler.toml` (`NFT_TYPE`/`GATE_ID`) and both gateways' consume
   verification
 
 **Out of scope:** the Sui framework; verifier implementations (nft-gate's own audits); downstream apps.
@@ -223,7 +223,7 @@ Critical / High / Medium / Low / Info / Positive.
 | `npm pack --dry-run` | 15 files, 33.4 kB; no `docs/audit/`, tests, scripts or env files |
 | `npm view @meddleware/access-gate-sui` | 0.0.6 published 2026-10-09T12:45Z; 0.0.5 (2026-10-02) not deprecated |
 | On-chain reads (GraphQL `graphql.testnet.sui.io`, read-only, 2026-10-09) | `0xd7ddaa94…` exists (v1); the caps `0x70be984f…` (of `0xa55789…`) and `0xf04a1d87…` (of `0x1a81ca…`) no longer exist (a package object always reads `Immutable`, so the missing cap is the evidence); the new cap `0x7d63f623…` is `AddressOwner` `0xa991…864a`; relay gate `0x316f1bf9…` is a `0xd7ddaa94…::access_gate::Gate` (soulbound, `default_uses` 10, price 10,000,000 MIST, admin cap `0x8e51e9f1…`, all policy flags `false`) |
-| Consumer trace (read-only files) | `access-gate-client/src/deployments.ts`, `seal-policies-sui/Move.toml`+`Move.lock`, `nft-gate/gateway-workers/wrangler.toml` all name `0xd7ddaa94…` / commit `7906954` / gate `0x316f1bf9…` (B.SC-1) |
+| Consumer trace (read-only files) | `access-gate-client/src/deployments.ts`, `sealed-storage-sui/Move.toml`+`Move.lock`, `access-gate-gateway/gateway-workers/wrangler.toml` all name `0xd7ddaa94…` / commit `7906954` / gate `0x316f1bf9…` (B.SC-1) |
 
 ---
 
@@ -395,7 +395,7 @@ The script now has:
 
 - `SECURITY.md` and `docs/onchain/*` (`83dbf25`);
 - access-gate-client `deployments` (generated from 0.0.6);
-- `seal-policies-sui` (pins `7906954`);
+- `sealed-storage-sui` (pins `7906954`);
 - nft-gate `NFT_TYPE` and `GATE_ID`.
 
 The OQ7 decision (2026-09-28, `0x0bedd0…` canonical) was superseded by the 2026-10-02 republish
@@ -408,7 +408,7 @@ The OQ7 decision (2026-09-28, `0x0bedd0…` canonical) was superseded by the 202
 Re-verified 2026-10-09. Tags `v0.0.1`–`v0.0.6` exist, in chronological order (`v0.0.5` → `b445876`;
 `v0.0.6` → `83dbf25`, the commit that points the docs at the 0.0.6 publication). Tags remain mutable: no
 tag protection is evidenced (the review token cannot read the repository's rulesets, so the setting is a
-maintainer item). `seal-policies-sui` pins the SHA (`790695489fc4`).
+maintainer item). `sealed-storage-sui` pins the SHA (`790695489fc4`).
 
 ### F16 — `SECURITY.md` claimed the UpgradeCap is burned on publish
 
@@ -603,7 +603,7 @@ server-issued challenge `nonce` (and `nft_id`) carried by `AccessConsumedEvent`:
 - `CLAUDE.md` invariant 2;
 - B.5 of the previous audit.
 
-Both nft-gate gateways, the only verifiers in the workspace and the live relay paywall, deliberately
+Both access-gate gateways, the only verifiers in the workspace and the live relay paywall, deliberately
 **do not** bind the nonce or `nft_id`.
 
 - They verify the consume transaction digest-first: exact event type, `sender` = signer, `gate_id`.
@@ -974,7 +974,7 @@ committed update configuration covered the npm lockfile or the pinned Action SHA
 
 **Severity:** Info   **Disposition:** ACCEPTED-RISK (testnet only; pre-v0.2 policy prefers a fresh package
 to compatibility shims; confirmed ACCEPTED 2026-10-22)
-**Where:** `0xa55789…` (immutable) and its relay gate `0xfd6c3b…`; `nft-gate/gateway-workers/wrangler.toml`
+**Where:** `0xa55789…` (immutable) and its relay gate `0xfd6c3b…`; `access-gate-gateway/gateway-workers/wrangler.toml`
 (`NFT_TYPE`, `GATE_ID`, `0xd7ddaa94…` / `0x316f1bf9…`).
 
 **Issue:** Version gating applies within one upgrade lineage (F32). A fresh publish has a new original-id,
@@ -1021,7 +1021,7 @@ on the previous script), run with shellcheck in `move-ci.yml`. Real-chain proof:
 | I2 | **Ownership:** single use spent only by the holder (by-value NFT); decrement + event | `::consume`, `::consume_soulbound`, `::consume_data` (`:751-829`) | `test_single_use_consume_*`, `test_soulbound_mint_and_consume` | HOLDS |
 | I3 | Replay: nonce ≥ 8 bytes, `consumer` recorded; uniqueness/freshness off-chain | `::consume_data:805` | `test_consume_short_nonce_aborts`, `test_consume_soulbound_short_nonce_aborts` | HOLDS (on-chain part); the verifier contract is digest-first and now documented as such (F34, resolved) |
 | I4 | **Gating / isolation:** an NFT and a cap are bound to one gate | `::consume_data:806`, `::assert_admin:858-860` | `test_consume_wrong_gate_aborts`, `test_consume_soulbound_wrong_gate_aborts`, `test_setter_with_foreign_admin_cap_aborts` | HOLDS |
-| I4b | `is_valid_for*` reports gate membership for dependants | `::is_valid_for*` (`:1103-1110`) | `test_is_valid_for_is_true_only_for_the_passes_own_gate` (F37), and `seal-policies-sui` tests | HOLDS |
+| I4b | `is_valid_for*` reports gate membership for dependants | `::is_valid_for*` (`:1103-1110`) | `test_is_valid_for_is_true_only_for_the_passes_own_gate` (F37), and `sealed-storage-sui` tests | HOLDS |
 | I5 | Exhaustion policy per gate (`auto_burn_at_zero`, read at consume) | `::consume_data:809,821` | `test_single_use_auto_burn_*`, `test_auto_burn_change_applies_to_existing_nfts`, `test_soulbound_auto_burn_consume_to_zero_emits_burn_and_deletes` | HOLDS (both pass types; F37 resolved) |
 | I6 | **Event ordering:** emit before delete | `::consume*`, `::burn*`, `::make_gate_immutable` | `test_burn_voluntary`, `test_burn_soulbound`, auto-burn tests (both pass types) | HOLDS |
 | I7 | **Capability binding:** `AdminCap` non-forgeable, per gate | `::share_new_gate`, `::assert_admin` | `test_setter_with_foreign_admin_cap_aborts`, `test_admin_setters` | HOLDS |
@@ -1061,10 +1061,10 @@ on the previous script), run with shellcheck in `move-ci.yml`. Real-chain proof:
 
 | Format | Exact layout | On-chain | Off-chain | Conformance |
 | --- | --- | --- | --- | --- |
-| `AccessConsumedEvent` | `{nft_id: ID, gate_id: ID, nonce: vector<u8>, consumer: address, uses_after: u64, timestamp_ms: u64}` at `<original-id>::access_gate::AccessConsumedEvent` | `consume_data` | nft-gate gateways (exact type, `sender`, `gate_id` — F34); access-gate-client `events.ts` (BCS layout) | gateways: env-gated live test (`live_consume_tx_valid`, `GRPC_TESTNET=1`; the Rust one still targets the immutable superseded `0xa55789…`/`0xfd6c3b…`, by design); access-gate-client: BCS decode tests and an ABI-drift integration test (passes against `0xd7ddaa94…`, 2026-10-09) |
+| `AccessConsumedEvent` | `{nft_id: ID, gate_id: ID, nonce: vector<u8>, consumer: address, uses_after: u64, timestamp_ms: u64}` at `<original-id>::access_gate::AccessConsumedEvent` | `consume_data` | access-gate gateways (exact type, `sender`, `gate_id` — F34); access-gate-client `events.ts` (BCS layout) | gateways: env-gated live test (`live_consume_tx_valid`, `GRPC_TESTNET=1`; the Rust one still targets the immutable superseded `0xa55789…`/`0xfd6c3b…`, by design); access-gate-client: BCS decode tests and an ABI-drift integration test (passes against `0xd7ddaa94…`, 2026-10-09) |
 | `Gate` object JSON (`paused`, `policy.pause_blocks_access`, `soulbound`, `default_uses`) | struct `Gate` (`:254-288`) | — | gateways' pause read (nft-gate F15); access-gate-client `gates.ts` | gateway unit fixtures; client tests |
 | `AccessNFT` / `SoulboundAccessNFT` `data.{gate_id, variant}` | `AccessData` (`:223-229`), enum `AccessVariant` | — | access-gate-client `ownership.ts` (`ownsAccessNft` — no uses filter, nft-gate F7); seal-policies via `is_valid_for*` | client tests; seal-policies Move tests |
-| Access-proof message | `nft-gate:access:v2` (audience-bound, digest-first consume) | — (off-chain only) | nft-gate-client, gateways | vectors published by nft-gate-client and asserted by both gateways (nft-gate audits) |
+| Access-proof message | `nft-gate:access:v2` (audience-bound, digest-first consume) | — (off-chain only) | access-gate-gateway-client, gateways | vectors published by access-gate-gateway-client and asserted by both gateways (nft-gate audits) |
 | Event and entry ABIs (all) | this module | — | access-gate-client builders + BCS layouts; both gateways | access-gate-client ABI-drift test against the recorded `published-at` (per its `CLAUDE.md`) |
 
 ### B.2 Publish authority, capabilities & secret custody
@@ -1131,7 +1131,7 @@ equals the signer of the proof and whose `gate_id` is the gate it serves, and ac
 through its own redemption store. The signed message names the verifier's audience and the digest
 (`nft-gate:access:v2`) and the consumption must be recent. The event `nonce` is optional.
 
-**Deployed verifier behaviour (nft-gate gateways, 0.0.21 + `main`, same as the contract above):**
+**Deployed verifier behaviour (access-gate gateways, 0.0.21 + `main`, same as the contract above):**
 
 - the access message is v2 (audience-bound) and names the digest; the details are in the nft-gate audits;
 - the consume transaction is fetched **by digest**, and an event of the exact type
@@ -1146,7 +1146,7 @@ through its own redemption store. The signed message names the verifier's audien
 | --- | --- | --- | --- | --- |
 | `GateCreatedEvent` | `share_new_gate` | `policy`, `free_gate_fee_paid_mist` (indexers) | before share | indexers (dao/treasury discover gates via `AdminCap` instead) |
 | `AccessMintedEvent` | `purchase`, `airdrop` | `commission_mist` (accounting) | before transfer | treasury-ui activity |
-| `AccessConsumedEvent` | `consume*` | digest (from the transaction), `consumer`/sender, `gate_id`, exact event type; `nonce` and `nft_id` optional (F34, same in docs and gateways) | after decrement, before delete | nft-gate gateways, treasury-ui (`consumer`) |
+| `AccessConsumedEvent` | `consume*` | digest (from the transaction), `consumer`/sender, `gate_id`, exact event type; `nonce` and `nft_id` optional (F34, same in docs and gateways) | after decrement, before delete | access-gate gateways, treasury-ui (`consumer`) |
 | `AccessBurnedEvent` | auto-burn, `burn*` | — | before delete | indexers |
 | `GateFrozenEvent` | `make_gate_immutable` | `locked_commission` | after `frozen = true`, before cap delete | UIs |
 | `GateMadeFreeEvent` | `make_gate_free` | `fee_paid_mist` | after the price change | indexers |
@@ -1161,10 +1161,10 @@ through its own redemption store. The signed message names the verifier's audien
 | `deployments.json` | testnet | `PlatformConfig 0x3f81489d…e7b5`, `authorityObjects` | object | Y (matches docs and the client) |
 | `SECURITY.md`, `docs/onchain/{overview,dev-guide,api-reference}.md`, `Move.toml` comment | testnet | `0xd7ddaa94…` / `0x3f81489d…` | both | Y (`83dbf25`) |
 | `@meddleware/access-gate-client` 0.0.8 (0.0.9 since 2026-10-10, same record) `src/deployments.ts` (generated from access-gate-sui 0.0.6) | testnet | `originalId`/`publishedAt` `0xd7ddaa94…`, `platformConfigId 0x3f81489d…` | both | Y |
-| `seal-policies-sui` 0.0.7 `Move.toml`/`Move.lock` | testnet | `rev = 790695489fc4…` (`7906954`, the publish record of `0xd7ddaa94…`) | git SHA | Y |
-| `nft-gate/gateway-workers/wrangler.toml` `NFT_TYPE` / `GATE_ID` | testnet | `0xd7ddaa94…::access_gate::SoulboundAccessNFT` / gate `0x316f1bf9…` | original-id (type) | Y |
-| `nft-gate/gateway-rust/src/sui_rpc.rs:658-678` (env-gated live test) | testnet | `0xa55789…` / `0xfd6c3b…`, commented as the superseded immutable package/gate | original-id | N, deliberately: it replays a recorded consume on an immutable package and does not serve traffic |
-| Apps' `VITE_ACCESS_GATE_ID_TESTNET` (GitHub repository variable consumed by the dashboard and token-deployer-ui image builds) | testnet | not readable from the repositories | gate | unverified directly; the 2026-10-09 paywall e2e through the live dashboard bought a pass on `0x316f1bf9…`, so the dashboard build carries the new gate |
+| `sealed-storage-sui` 0.0.7 `Move.toml`/`Move.lock` | testnet | `rev = 790695489fc4…` (`7906954`, the publish record of `0xd7ddaa94…`) | git SHA | Y |
+| `access-gate-gateway/gateway-workers/wrangler.toml` `NFT_TYPE` / `GATE_ID` | testnet | `0xd7ddaa94…::access_gate::SoulboundAccessNFT` / gate `0x316f1bf9…` | original-id (type) | Y |
+| `access-gate-gateway/gateway-rust/src/sui_rpc.rs:658-678` (env-gated live test) | testnet | `0xa55789…` / `0xfd6c3b…`, commented as the superseded immutable package/gate | original-id | N, deliberately: it replays a recorded consume on an immutable package and does not serve traffic |
+| Apps' `VITE_ACCESS_GATE_ID_TESTNET` (GitHub repository variable consumed by the dashboard and token-issuance-ui image builds) | testnet | not readable from the repositories | gate | unverified directly; the 2026-10-09 paywall e2e through the live dashboard bought a pass on `0x316f1bf9…`, so the dashboard build carries the new gate |
 
 ### B.SC-2 Coupling (scripts' PTB only)
 
@@ -1304,7 +1304,7 @@ tests, against the real contract (not a self-compared vector).
     ABI-drift test) and both gateways (live test).
   - The *semantic* contract, which fields a verifier binds, is the same in this package's docs and in
     the gateways since 0.0.6: digest-first redemption (F34, resolved).
-  - The access proof itself lives in nft-gate-client / nft-gate vectors.
+  - The access proof itself lives in access-gate-gateway-client / nft-gate vectors.
 - **On-chain-truth boundary:** prices, commission, fees, pass validity and version are decided
   on-chain. UIs and clients split exact amounts and only preview.
 - **Deployment readiness:** Section D. Everything up to testnet is ticked; mainnet is blocked on custody
@@ -1550,7 +1550,7 @@ tests, against the real contract (not a self-compared vector).
   - Republished on testnet: `0xd7ddaa94…` (`7906954`, `83dbf25`), `PlatformConfig 0x3f81489d…`, UpgradeCap
     `0x7d63f623…` (read on-chain: owned by the publisher EOA). The superseded `0xa55789…` cap
     `0x70be984f…` was burned (object gone). Relay gate `0x316f1bf9…` (soulbound, 10 uses) created;
-    the Worker, access-gate-client 0.0.8 and seal-policies-sui 0.0.7 (`790695489fc4`) point at it.
+    the Worker, access-gate-client 0.0.8 and sealed-storage-sui 0.0.7 (`790695489fc4`) point at it.
   - Measured: `sui move test` 94/94, coverage 100.00%, lint clean (warnings as errors), npm pack 15
     files / 33.4 kB, npm 0.0.6 published; shellcheck not re-run (CI). Test counts per abort code
     re-counted from the source (13: 20 tests; 15 and 16: 2 each).

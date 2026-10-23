@@ -15,7 +15,7 @@ and these ids per network in its `deployments` export); the examples below use `
 directly so the on-chain contract is explicit. `PKG` stands for both ids, which are equal until the
 package is upgraded: transactions call the **latest published-at** id, while types and events are
 matched at the **original id**. The gateway challenge/proof wire format is in
-`@meddleware/nft-gate-client`.
+`@meddleware/access-gate-gateway-client`.
 
 ## Normative integration rules
 

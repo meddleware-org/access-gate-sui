@@ -86,7 +86,7 @@ entries/branches.
   field + a view + tests.
 - If you touch the ABI (entry signatures, event fields, abort codes), update the TS client
   (`@meddleware/access-gate-client`: builders, BCS event layouts, `ACCESS_GATE_ABORTS`) and both
-  `nft-gate` gateways — they mirror this.
+  access-gate gateways — they mirror this.
 
 ---
 

@@ -76,7 +76,7 @@ package links against:
 
 ```toml
 [dependencies]
-# Pin the commit whose Published.toml records the publication you link against (seal-policies-sui's
+# Pin the commit whose Published.toml records the publication you link against (sealed-storage-sui's
 # Move.toml shows the current one). See docs/audit/access-gate-sui-audit.md for the address history.
 access_gate = { git = "https://github.com/meddleware-org/access-gate-sui.git", rev = "<full commit SHA>" }
 ```
