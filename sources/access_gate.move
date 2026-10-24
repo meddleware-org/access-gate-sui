@@ -553,6 +553,8 @@ fun share_new_gate(
     free_gate_fee_paid_mist: u64,
     ctx: &mut TxContext,
 ) {
+    // A `@0x0` recipient would burn every operator share (audit OQ12): refuse it for every create path.
+    assert!(payment_recipient != @0x0, E_ZERO_ADDRESS);
     let gate_uid = object::new(ctx);
     let gate_id = gate_uid.to_inner();
     let cap = AdminCap { id: object::new(ctx), gate_id };
@@ -946,6 +948,7 @@ public fun set_payment_recipient(
 ) {
     check_version(platform);
     assert_admin_mutable(cap, gate);
+    assert!(recipient != @0x0, E_ZERO_ADDRESS);
     gate.payment_recipient = recipient;
 }
 

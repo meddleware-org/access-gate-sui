@@ -1610,3 +1610,4 @@ tests, against the real contract (not a self-compared vector).
 - [x] Re-verification log entry added.
 - [x] 2026-10-22 (close-out): OQ6, OQ8, OQ12 and OQ21 carry their decisions; F20 and F48 confirmed; log entry added; no counts change.
 - [x] 2026-10-22 (testnet rehearsal): F49 added (RESOLVED); the OQ21 and C.2 Section D boxes ticked with digests; counts 49 findings (RESOLVED 34); log entry added.
+- 2026-10-24 — OQ12 implemented: `create_gate`, `create_free_gate` (via `share_new_gate`) and `set_payment_recipient` abort `E_ZERO_ADDRESS` (9) on `@0x0`; three expected-failure tests; 97 Move tests pass. Body-only, upgrade-compatible; ships as 0.0.10 with the testnet upgrade in release wave R1.

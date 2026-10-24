@@ -733,6 +733,51 @@ fun test_set_platform_treasury_zero_address_aborts() {
     s.end();
 }
 
+#[test]
+#[expected_failure(abort_code = 9)] // E_ZERO_ADDRESS (OQ12)
+fun test_create_gate_zero_payment_recipient_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::create_gate(
+        &platform, 100, @0x0, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(), access_gate::default_gate_policy(), s.ctx(),
+    );
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 9)] // E_ZERO_ADDRESS (OQ12)
+fun test_create_free_gate_zero_payment_recipient_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform(&mut s);
+    let platform = s.take_shared<PlatformConfig>();
+    let fee = coin::mint_for_testing<SUI>(platform.platform_free_gate_fee_mist(), s.ctx());
+    access_gate::create_free_gate(
+        &platform, fee, @0x0, 0, false, false,
+        b"".to_string(), b"".to_string(), b"".to_string(), access_gate::default_gate_policy(), s.ctx(),
+    );
+    ts::return_shared(platform);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 9)] // E_ZERO_ADDRESS (OQ12)
+fun test_set_payment_recipient_zero_address_aborts() {
+    let mut s = ts::begin(CREATOR);
+    new_gate(&mut s, 100, 3, false, false);
+    s.next_tx(CREATOR);
+    let cap = s.take_from_sender<AdminCap>();
+    let mut gate = s.take_shared<Gate>();
+    let platform = s.take_shared<PlatformConfig>();
+    access_gate::set_payment_recipient(&cap, &mut gate, &platform, @0x0);
+    ts::return_shared(platform);
+    s.return_to_sender(cap);
+    ts::return_shared(gate);
+    s.end();
+}
+
 // ── init defaults ─────────────────────────────────────────────────────────────────
 
 #[test]

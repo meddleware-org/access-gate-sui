@@ -131,7 +131,7 @@ form — match types tolerantly.
 ## Error handling
 
 Abort codes are unique **within** `access_gate` (see the [API reference](api-reference.md)). Other
-packages reuse the same small integers (e.g. `seal_policies::nft_gate` also uses 1–3), so always key
+packages reuse the same small integers (e.g. `sealed_storage::nft_gate` also uses 1–3), so always key
 error messages on **`(module, code)`**, never on the code alone.
 
 ## Versioning

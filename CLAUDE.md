@@ -47,7 +47,7 @@ Consumers (a gateway, a frontend, a contract) compose on top.
    fixed too: no `soulbound` setter, and `set_default_uses` cannot cross zero (`E_USES_KIND_IMMUTABLE`).
    Mints use `effective_commission_terms` (freeze snapshot if locked, else live terms).
    `pause_blocks_access` is enforced here (`consume` aborts) and by gateways;
-   `pause_blocks_decryption` only by dependants (`seal_policies::nft_gate`).
+   `pause_blocks_decryption` only by dependants (`sealed_storage::nft_gate`).
 8. **The platform is always paid** — commission = `max(bps share, min_commission)` capped at 10%;
    paid price ≥ `min_paid_price_mist`; price 0 only after the free-gate fee; airdrops pay the
    commission.
