@@ -94,7 +94,7 @@ rely on it. All flags default to `false`:
 | `freeze_requires_unpaused` | `make_gate_immutable` aborts 10 while the gate is paused, so a frozen gate can never be stuck unpurchasable. |
 | `lock_commission_on_freeze` | Freezing snapshots the platform commission terms; mints on the frozen gate use them, whatever the platform later sets. |
 | `pause_blocks_decryption` | Dependent decryption policies (`seal_policies::nft_gate`) deny access while the gate is paused. |
-| `pause_blocks_access` | While paused, `consume*` aborts 1 and access gateways (`nft-gate`) deny holders. Independent of `pause_blocks_decryption`. |
+| `pause_blocks_access` | While paused, `consume*` aborts 1 and access gateways (`access-gate-gateway`) deny holders. Independent of `pause_blocks_decryption`. |
 
 Without a restricting flag, pausing only stops purchases. The policy binds the gate, not the
 creator's tooling: tools (e.g. `access-gate-ui`) choose which policy their gates carry, and anyone
