@@ -92,7 +92,7 @@ entries/branches.
 
 ## Deferred documentation — NOT for the `docs.` website (planned here per Part 0.4)
 
-> Captured for the future **`dev.meddleware.co.uk`** subdomain and white-label offering; excluded
+> Captured for the future **`meddleware.dev`** subdomain and white-label offering; excluded
 > from the user-facing `docs.` site (which explains gates for operators and buyers in plain terms).
 
 ### `dev.` — developer/integrator reference (to write later)
