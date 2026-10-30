@@ -33,7 +33,7 @@ npm `@meddleware/access-gate-sui` 0.0.6 was published 2026-10-09T12:45Z (tag `v0
 (2026-10-02) carried the earlier, stale audit and remains on the registry (F43). Checked 2026-10-18: 0.0.6 is
 still `latest` (no newer release; `main` has only audit commits since the tag, `83dbf25`), SLSA v1 provenance present.
 Consumers: `@meddleware/access-gate-client` 0.0.9 pins `0.0.6` exactly (devDependency); the docs and dev sites depend on `^0.0.6`.
-**Review date:** 2026-09-18 (first pass) · relocated 2026-09-28 · re-verified 2026-10-03 · **re-verified 2026-10-09** · release status 2026-10-18
+**Review date:** 2026-09-18 (first pass) · relocated 2026-09-28 · re-verified 2026-10-03 · **re-verified 2026-10-09** · release status 2026-10-18; 0.0.11 re-verified 2026-10-30 (Point documentation links at the machine zone (ADR-0005))
 **Reviewer:** Internal review (Move contract reviewer)
 **Severity ceiling:** High — the package moves SUI on every paid mint (price, commission, fees) and
   holds upgrade and platform authority, so a capability or accounting flaw could misroute funds for
