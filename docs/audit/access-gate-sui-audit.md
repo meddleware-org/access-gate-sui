@@ -6,7 +6,7 @@
   gating; plus the publish/custody scripts and the npm package that ships the source, records and
   on-chain docs)
 **Project type:** Move package (+ on-chain operations scripts + npm package)
-**Template:** AUDIT_TEMPLATE.md (2026-10-08) + AUDIT_TEMPLATE_SUI.md (2026-09-28) +
+**Template:** AUDIT_TEMPLATE.md (2026-11-01) + AUDIT_TEMPLATE_SUI.md (2026-09-28) +
   AUDIT_TEMPLATE_OPS.md (2026-10-08) + AUDIT_TEMPLATE_TS.md (2026-10-08, npm-package rows only — the
   package ships no TypeScript) + AUDIT_TEMPLATE_SUI_CLIENT.md (2026-10-08, applied only to the
   `publish.sh --create-gate` PTB)
@@ -33,7 +33,7 @@ npm `@meddleware/access-gate-sui` 0.0.6 was published 2026-10-09T12:45Z (tag `v0
 (2026-10-02) carried the earlier, stale audit and remains on the registry (F43). Checked 2026-10-18: 0.0.6 is
 still `latest` (no newer release; `main` has only audit commits since the tag, `83dbf25`), SLSA v1 provenance present.
 Consumers: `@meddleware/access-gate-client` 0.0.9 pins `0.0.6` exactly (devDependency); the docs and dev sites depend on `^0.0.6`.
-**Review date:** 2026-09-18 (first pass) · relocated 2026-09-28 · re-verified 2026-10-03 · **re-verified 2026-10-09** · release status 2026-10-18; 0.0.11 re-verified 2026-10-30 (Point documentation links at the machine zone (ADR-0005))
+**Review date:** 2026-09-18 (first pass) · relocated 2026-09-28 · re-verified 2026-10-03 · **re-verified 2026-10-09** · release status 2026-10-18; 0.0.11 released 2026-10-30 (Point documentation links at the machine zone (ADR-0005)); frontend-wave delta review 2026-11-01 (real review of the 2026-10-19 → 2026-11-01 changes; see the delta section)
 **Reviewer:** Internal review (Move contract reviewer)
 **Severity ceiling:** High — the package moves SUI on every paid mint (price, commission, fees) and
   holds upgrade and platform authority, so a capability or accounting flaw could misroute funds for
@@ -129,6 +129,8 @@ F48 (the republish orphans gates and passes on the superseded package; accepted 
 policy).
 
 ---
+
+**2026-11-01 update.** The 0.0.11 release (2026-10-30) changed versions, generated comments and the lockfile only; this review re-ran every gate and found nothing to fix (F50, Positive).
 
 ## Threat model / trust boundaries
 
@@ -1013,6 +1015,18 @@ on the previous script), run with shellcheck in `move-ci.yml`. Real-chain proof:
 
 ---
 
+### Frontend wave delta review (2026-11-01) — 0.0.11 reviewed
+
+Scope: the changes since the last substantive entry of this audit: 0.0.11 (2026-10-30: documentation links; package metadata) after the OQ12 zero-recipient change (2026-10-24, logged, D79). The release tool's "re-verified" mark for the 2026-10-30 release recorded no review; this section is the review. Read the diff of the release commits (version strings and generated comments only — no source or Move change in the wave) and re-ran this repository's gates. Ran: `sui move test` with Sui 1.81.0: 97 tests, 97 passed (including the three `E_ZERO_ADDRESS` expected failures and the `wrong_version_blocks_*` family); the 10-30 diff is the version string only.
+
+### F50 — Positive: the refreshed release passes its own gates, with nothing changed in the shipped logic
+**Severity:** Positive
+**Evidence:** all 97 Move tests pass on the 0.0.11 source; the published `Published.toml` is the record the clients generate from (the generated ids in access-gate-client 0.0.13 and sealed-storage-client 0.0.26 match it).
+
+### Delta notes
+- **A11Y lens:** Move package: not triggered.
+- **Supply chain:** published through the tag-gated trusted-publisher workflow with provenance (unchanged); Dependabot configuration present.
+
 ## Section A — Invariant verification matrix
 
 | # | Invariant | Enforced / asserted at | Proven by | Status |
@@ -1590,6 +1604,7 @@ tests, against the real contract (not a self-compared vector).
   - **Fixed (F49, 0.0.8, commit pending):** `scripts/make-immutable.sh`, `tests/scripts/make_immutable_test.sh` (new, 5 cases; 4 fail on the old script; shellcheck clean), `move-ci.yml` (shellcheck over `tests/scripts` and the test), `CUSTODY.md` (current CLI for the upgrade, record the new `published-at`, the testnet rehearsal). `sui move test` 94/94 unchanged.
   - **Dispositions (49 findings):** RESOLVED 34 (adds F49), Positive 7, ADJUDICATED 3, MITIGATED 1, ACCEPTED-RISK 2, DEFERRED 2 (F2, F3, mainnet-blocked). Section D: the OQ21 box and the C.2 box are ticked; the mainnet boxes are unchanged. Cost to the runner: about 0.15 SUI to the multisig (a throwaway address) and 0.03 SUI of fees.
   - **Not exercised:** a mainnet publication; the live `0xd7ddaa94…` caps (deliberately); `transfer-platform-authority.sh` without `--include-upgrade-cap`; a threshold below the number of members (the rehearsal used 2-of-2).
+- 2026-11-01 — frontend-wave delta review of 0.0.11: read the 10-30 release diff (no source change) and re-ran the gates (see the delta section); recorded F50 as Positive. The release tool's bare "re-verified" mark was reworded to "released". `**Template:**` dates reconciled to the 2026-11-01 registry with no disposition change.
 
 ## Pre-save consistency checklist (this pass)
 
