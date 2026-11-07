@@ -10,7 +10,7 @@
   AUDIT_TEMPLATE_OPS.md (2026-10-08) + AUDIT_TEMPLATE_TS.md (2026-10-08, npm-package rows only — the
   package ships no TypeScript) + AUDIT_TEMPLATE_SUI_CLIENT.md (2026-10-08, applied only to the
   `publish.sh --create-gate` PTB)
-**Package:** `access_gate` v0.0.6; edition 2024; framework rev `b0535f1f3a3310e71790e90d8ae4e8ca840c897e`
+**Package:** `access_gate` `Move.toml` 0.0.9 (npm 0.0.11); edition 2024; framework rev `b0535f1f3a3310e71790e90d8ae4e8ca840c897e`
   (`Move.lock`, testnet and localnet)
 **Deployment status:**
 
@@ -22,6 +22,8 @@
 | testnet | `0x0bedd0b27d993d3292ca6a5315f7562de8bc0ff3752b445b4c53252c76f2d20d` (superseded, pre-policy) | — | `0x1ab9a455…` burned 2026-09-28 | immutable |
 | testnet | strays `0x692547ae…68bc`, `0x891cc27c…985c`, `0xbd2b4f…7f79` | — | burned 2026-09-28 | immutable |
 | mainnet | — | — | — | unpublished |
+
+**Update 2026-11-07 (deployment table):** the first row's package was **upgraded on 2026-10-24** to version 2 (`Published.toml`: `published-at = 0x0849ea3c78fa3870a023a97a4c9034b5486f26ac3b2a2d069fead5c49ab6c3fe`, `original-id = 0xd7ddaa94…`, `version = 2`, toolchain 1.82.2, same `UpgradeCap` `0x7d63f623…`); the upgrade is the OQ12 zero-recipient refusal (log entries of 2026-10-24) and moved no state. Types and events still match at the original id; transactions call the latest published-at. The cap is still held by the deploy key on testnet (decision OQ21). `PlatformConfig` and the relay gate are unchanged. Mainnet is unpublished: the `init` defaults it will take at publication are 20 bps, `min_commission_mist` 500 000 (0.0005 SUI) and `free_gate_fee_mist` 1 000 000 000 (1 SUI) (D57).
 
 `PlatformConfig` (testnet, current) is `0x3f81489df58233d96798f34ad44de325e1b4df7e4d615affe72ca181969ee7b5`.
 The live Walrus relay gate is `0x316f1bf9764db352e925bb598aff44ea77be4ab652f0bd2eb3fdcc0a378faddc`, a
@@ -1605,6 +1607,7 @@ tests, against the real contract (not a self-compared vector).
   - **Dispositions (49 findings):** RESOLVED 34 (adds F49), Positive 7, ADJUDICATED 3, MITIGATED 1, ACCEPTED-RISK 2, DEFERRED 2 (F2, F3, mainnet-blocked). Section D: the OQ21 box and the C.2 box are ticked; the mainnet boxes are unchanged. Cost to the runner: about 0.15 SUI to the multisig (a throwaway address) and 0.03 SUI of fees.
   - **Not exercised:** a mainnet publication; the live `0xd7ddaa94…` caps (deliberately); `transfer-platform-authority.sh` without `--include-upgrade-cap`; a threshold below the number of members (the rehearsal used 2-of-2).
 - 2026-11-01 — frontend-wave delta review of 0.0.11: read the 10-30 release diff (no source change) and re-ran the gates (see the delta section); recorded F50 as Positive. The release tool's bare "re-verified" mark was reworded to "released". `**Template:**` dates reconciled to the 2026-11-01 registry with no disposition change.
+- 2026-11-07 — mainnet-readiness sweep (delta; no Move source change since the 2026-10-24 upgrade). Ran `sui move test --coverage --build-env testnet` with sui 1.81.0: **97 tests pass, `access_gate` module coverage 100.00%** (the earlier "100%" claims came from the review sandbox and were not a gate). CI now enforces both: `move-ci.yml` runs the tests with `--coverage` and fails if any module is below 100% (`sui move coverage summary` parsed), next to the existing `--lint --warnings-are-errors` build. Header and deployment table corrected for the 2026-10-24 version-2 upgrade (`0x0849ea3c…`) and the current package/npm versions. Read the diff since the last full pass (`7906954..HEAD`): the fee-default change (D57; takes effect only at a mainnet `init`), the `E_ZERO_ADDRESS` refusals in `share_new_gate` and `set_payment_recipient`, their tests — consistent with F-ids and OQ12. **Open before the first mainnet publish (irreversible after the UpgradeCap burn):** OQ20 (ceilings for `min_commission_mist`/`free_gate_fee_mist`, recommendation recorded) is FU-0023 and OQ9 (snapshot `auto_burn_at_zero` per NFT) is FU-0024; both are maintainer decisions. GAP I11 (cap custody) is closed only by the mainnet custody steps (FU-0002, FU-0004). The mainnet publish, transfer and burn steps are FU-0001 to FU-0004 and `docs/operations/MAINNET_PUBLISH.md`. Not done: Move Prover or fuzzing (no Prover specs exist; recorded as a gap, not attempted).
 
 ## Pre-save consistency checklist (this pass)
 

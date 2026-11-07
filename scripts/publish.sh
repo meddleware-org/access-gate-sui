@@ -25,7 +25,7 @@
 # Env for --create-gate (all optional; sensible defaults shown):
 #   GATE_PRICE_MIST        default 0        (free: pays the PlatformConfig free-gate fee from gas;
 #                                            a paid price must be >= the platform minimum)
-#   GATE_PAYMENT_RECIPIENT default = active address
+#   GATE_PAYMENT_RECIPIENT default = active address (mainnet: REQUIRED, and never the deploy key)
 #   GATE_DEFAULT_USES      default 0        (0 = unlimited pass; N = single-use)
 #   GATE_SOULBOUND         default true
 #   GATE_AUTO_BURN         default false
@@ -34,7 +34,8 @@
 #   GATE_NFT_DESCRIPTION   default ""
 #   GATE_FREEZE_REQUIRES_UNPAUSED / GATE_LOCK_COMMISSION_ON_FREEZE /
 #   GATE_PAUSE_BLOCKS_DECRYPTION / GATE_PAUSE_BLOCKS_ACCESS
-#                          default false    (immutable GatePolicy flags)
+#                          default false    (immutable GatePolicy flags; mainnet requires GATE_PAUSE_BLOCKS_ACCESS to be set
+#                                            explicitly: the relay gate is created with true)
 #   GAS_BUDGET             default 200000000
 #
 # Safety (preflight, before anything is signed):
@@ -135,6 +136,22 @@ if [ -n "${EXPECTED_SIGNER:-}" ]; then
         || { log "ERROR: the active address ${SIGNER} is not EXPECTED_SIGNER ${EXPECTED_SIGNER}."; exit 1; }
 elif [ "$NETWORK" = "mainnet" ]; then
     log "ERROR: mainnet requires EXPECTED_SIGNER (the address that must hold the deploy key)."; exit 1
+fi
+# The first mainnet gate is the relay gate (audit F45, decided 2026-10-22): nothing about it may be defaulted. The recipient receives
+# every operator share, so it must be named (the entity multisig, never the deploy key), and whether a pause blocks access must be said.
+if [ "$NETWORK" = "mainnet" ] && [ -n "$CREATE_GATE" ]; then
+    [ -n "${GATE_PAYMENT_RECIPIENT:-}" ] \
+        || { log "ERROR: mainnet --create-gate requires GATE_PAYMENT_RECIPIENT (the entity multisig); it never defaults to the deploy key."; exit 1; }
+    [[ "$GATE_PAYMENT_RECIPIENT" =~ ^0x[0-9a-fA-F]{1,64}$ ]] \
+        || { log "ERROR: GATE_PAYMENT_RECIPIENT must be a 0x-prefixed address."; exit 1; }
+    [ "$(norm_addr "$GATE_PAYMENT_RECIPIENT")" != "$(norm_addr "$SIGNER")" ] \
+        || { log "ERROR: GATE_PAYMENT_RECIPIENT is the deploy key; the operator share must go to the entity multisig."; exit 1; }
+    [ "$(norm_addr "$GATE_PAYMENT_RECIPIENT")" != "$(norm_addr 0x0)" ] \
+        || { log "ERROR: GATE_PAYMENT_RECIPIENT must not be 0x0."; exit 1; }
+    case "${GATE_PAUSE_BLOCKS_ACCESS:-}" in
+        true|false) ;;
+        *) log "ERROR: mainnet --create-gate requires GATE_PAUSE_BLOCKS_ACCESS=true|false explicitly (the relay gate is created with true, audit F45)."; exit 1 ;;
+    esac
 fi
 # Enough gas for the budget, before anything is signed.
 BALANCE=$(sui client gas --json 2>/dev/null | jq -r '([.gasCoins[]?.mistBalance] | add // 0) + (.addressMistBalance // 0)')

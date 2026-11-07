@@ -40,8 +40,12 @@ jobs:
       - name: Build (lints on, warnings are errors)
         run: sui move build --build-env testnet --lint --warnings-are-errors
 
-      - name: Test
-        run: sui move test --build-env testnet
+      - name: Test with coverage (every module at 100%)
+        run: |
+          sui move test --build-env testnet --coverage
+          sui move coverage summary | tee "$RUNNER_TEMP/coverage.txt"
+          grep -q "% Module coverage:" "$RUNNER_TEMP/coverage.txt"
+          awk '/% Module coverage:/ { if ($NF + 0 < 100) bad = 1 } END { exit bad }' "$RUNNER_TEMP/coverage.txt"
 
   shellcheck:
     name: shellcheck (ops scripts)
@@ -53,4 +57,6 @@ jobs:
         run: shellcheck -x -P SCRIPTDIR scripts/*.sh tests/scripts/*.sh
 
       - name: Offline script tests
-        run: bash tests/scripts/make_immutable_test.sh
+        run: |
+          bash tests/scripts/make_immutable_test.sh
+          bash tests/scripts/publish_guard_test.sh
