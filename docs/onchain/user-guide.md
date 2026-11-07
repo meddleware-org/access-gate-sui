@@ -44,7 +44,7 @@ Things to know:
 - **Auto-burn applies to existing passes.** The auto-burn setting is read when a pass is used, so
   changing it affects passes that were already minted.
 - **The platform commission is not frozen with your gate** — unless the gate's policy locks it.
-  Otherwise the platform operator can change the commission (never above 10%) for all gates,
+  Otherwise the platform (MeddleWare) can change the commission (never above 10%) for all gates,
   including frozen ones.
 - **A gate's policy is permanent.** Some tools create gates with extra rules, recorded on the gate
   when it is created and visible to everyone: *no freezing while paused*, *freezing locks in the

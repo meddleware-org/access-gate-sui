@@ -19,7 +19,7 @@ particular consumer.
 | `AccessNFT` | owned, **transferable** | A pass that can be sent or traded. |
 | `SoulboundAccessNFT` | owned, **non-transferable** | A pass bound to the wallet that received it. |
 | `PlatformConfig` | shared (one per package) | Platform treasury, commission terms (rate + minimum) and the free-gate fee. |
-| `PlatformAdminCap` | owned (platform operator) | Authority to change the platform treasury, commission terms and free-gate fee. |
+| `PlatformAdminCap` | owned (the platform) | Authority to change the platform treasury, commission terms and free-gate fee. |
 
 ## Pass flavours
 
@@ -40,7 +40,7 @@ is refunded, and the pass is minted to the buyer — all in one transaction.
 - **Airdrops** (passes granted by the gate's admin) pay the same commission a purchase would, so a
   gate cannot sell off-chain and grant on-chain to avoid it.
 
-The platform operator sets these terms in `PlatformConfig`; see the
+MeddleWare, as the platform, sets these terms in `PlatformConfig`; see the
 [API reference](api-reference.md#commission-and-fees).
 
 ## Trust boundaries (summary)
@@ -49,7 +49,7 @@ The platform operator sets these terms in `PlatformConfig`; see the
   commission cap.
 - A **gate creator** controls their own gate until they freeze it (`make_gate_immutable`), which is
   irreversible.
-- The **platform operator** can change the treasury and commission terms (never above 10% of a
+- The **platform** (MeddleWare) can change the treasury and commission terms (never above 10% of a
   price) for every gate of this package, including frozen ones — except frozen gates whose policy
   locked the commission.
 - Each gate carries an immutable **policy** chosen at creation (no freezing while paused, commission
