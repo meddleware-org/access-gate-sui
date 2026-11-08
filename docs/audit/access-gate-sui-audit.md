@@ -1303,7 +1303,7 @@ tests, against the real contract (not a self-compared vector).
 - [x] live-only paths (C.2) exercised on testnet, including an upgrade + `migrate` — 2026-10-22 on the scratch publication: upgrade `E1jsVrjMhMRFGLwwhJrTGbKaDDxV47aDNWGcXGCuwEZW` (v2 `0x12d50145…c5af`), `migrate` `BEMeJ7oCX2SzvYfn3gmcsaKLxYU8YQdMcYcWD9rfrYLr` (`PlatformMigratedEvent` 1 → 2); a `purchase` dry run against the old `published-at` aborts 13 (`check_version`) after it and succeeds against the new one. Before `migrate`: v1 succeeds, v2 aborts 13. S4's localnet script is still a suggestion
 - [x] mainnet double guards in place; skipped runs never report success — F45
 - [x] runbook links every script with dry-run and recovery commands, including `SECURITY.md` scope — F39, B.OPS-1
-- [ ] external audit — maintainer / mainnet item
+- [ ] external audit (ADR-0009 gate G2: required before the UpgradeCap burn, not before the mainnet publish; FU-0018) — maintainer item
 
 ---
 
