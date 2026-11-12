@@ -24,10 +24,12 @@
 # Prerequisites:
 #   - sui CLI active on <network> with the deploy EOA as the active address
 #   - .env.<network> written by `publish.sh` (ACCESS_GATE_PACKAGE_ID, ACCESS_GATE_*_ID)
-#   - MULTISIG_ADDRESS set as an env var or passed as $1
+#   - MULTISIG_ADDRESS set as an env var or passed as $1, with MULTISIG_PKS, MULTISIG_WEIGHTS and MULTISIG_THRESHOLD: the
+#     script re-derives the address from them (sui keytool multi-sig-address) and refuses on a mismatch
 #
 # Usage:
-#   NETWORK=testnet MULTISIG_ADDRESS=0x<64hex> bash scripts/transfer-platform-authority.sh
+#   MULTISIG_PKS="<pk1> <pk2>" MULTISIG_WEIGHTS="1 1" MULTISIG_THRESHOLD=2 \
+#     NETWORK=testnet MULTISIG_ADDRESS=0x<64hex> bash scripts/transfer-platform-authority.sh
 #   NETWORK=testnet MULTISIG_ADDRESS=0x<64hex> bash scripts/transfer-platform-authority.sh --include-upgrade-cap
 #   DRY_RUN=0 NETWORK=testnet MULTISIG_ADDRESS=0x<64hex> bash scripts/transfer-platform-authority.sh
 
@@ -109,6 +111,25 @@ fi
 long_addr() { local h="${1#0x}"; printf '0x%064s' "${h,,}" | tr ' ' 0; }
 PKG_LONG="$(long_addr "$PACKAGE_ID")"
 FW="0x0000000000000000000000000000000000000000000000000000000000000002"
+
+# ── The recipient must be the multisig of the RECORDED keys, weights and threshold ────────────────────────────
+# An address that only looks right is not enough for an irreversible hand-over of admin capabilities: re-derive it
+# with the CLI from the keys that will sign and refuse on any mismatch (key-custody audit F4, FU-0083). Use the
+# exact values you recorded: scripts/multisig-address.sh prints the address for them.
+: "${MULTISIG_PKS:?set MULTISIG_PKS to the space-separated base64 public keys (with flag) of the multisig members}"
+: "${MULTISIG_WEIGHTS:?set MULTISIG_WEIGHTS to one weight per key, space-separated}"
+: "${MULTISIG_THRESHOLD:?set MULTISIG_THRESHOLD to the total weight needed to sign}"
+read -r -a MS_PKS <<<"$MULTISIG_PKS"
+read -r -a MS_WEIGHTS <<<"$MULTISIG_WEIGHTS"
+[[ "${#MS_PKS[@]}" -ge 1 && "${#MS_PKS[@]}" -eq "${#MS_WEIGHTS[@]}" ]] || { warn "ERROR: ${#MS_PKS[@]} keys but ${#MS_WEIGHTS[@]} weights."; exit 1; }
+[[ "$MULTISIG_THRESHOLD" =~ ^[0-9]+$ ]] || { warn "ERROR: MULTISIG_THRESHOLD must be a number."; exit 1; }
+MS_TOTAL=0; for w in "${MS_WEIGHTS[@]}"; do [[ "$w" =~ ^[0-9]+$ ]] || { warn "ERROR: weight '$w' is not a number."; exit 1; }; MS_TOTAL=$((MS_TOTAL + w)); done
+[[ "$MULTISIG_THRESHOLD" -ge 1 && "$MULTISIG_THRESHOLD" -le "$MS_TOTAL" ]] || { warn "ERROR: threshold $MULTISIG_THRESHOLD must be between 1 and the total weight $MS_TOTAL."; exit 1; }
+MS_DERIVED="$(sui keytool multi-sig-address --pks "${MS_PKS[@]}" --weights "${MS_WEIGHTS[@]}" --threshold "$MULTISIG_THRESHOLD" --json 2>/dev/null | jq -r '.multisigAddress // empty')"
+[[ -n "$MS_DERIVED" ]] || { warn "ERROR: the CLI could not derive a multisig address from MULTISIG_PKS / MULTISIG_WEIGHTS / MULTISIG_THRESHOLD."; exit 1; }
+[[ "$(long_addr "$MS_DERIVED")" == "$(long_addr "$MULTISIG_ADDRESS")" ]] \
+  || { warn "ERROR: MULTISIG_ADDRESS $MULTISIG_ADDRESS is not the multisig of the given keys, weights and threshold (that is $MS_DERIVED). Nothing was sent."; exit 1; }
+echo "OK    MULTISIG_ADDRESS is the ${MULTISIG_THRESHOLD}-of-weight-${MS_TOTAL} multisig of ${#MS_PKS[@]} recorded key(s)"
 
 echo "Active address : $ACTIVE_ADDRESS"
 echo "Package ID     : $PACKAGE_ID"

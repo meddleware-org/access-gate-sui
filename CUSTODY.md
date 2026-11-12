@@ -20,7 +20,7 @@ A gate's `AdminCap` belongs to that gate's owner, not to the platform, and is ou
 1. **Publish** from the deploy key: `scripts/publish.sh <network>`. The deploy key holds every object
    above. `deployments.json` records `custody.upgradeCapOwner` as the deploy key.
 2. **Transfer** to the multisig:
-   `DRY_RUN=0 NETWORK=<network> MULTISIG_ADDRESS=0x… bash scripts/transfer-platform-authority.sh --include-upgrade-cap`.
+   `MULTISIG_PKS="<pks>" MULTISIG_WEIGHTS="<weights>" MULTISIG_THRESHOLD=<n> DRY_RUN=0 NETWORK=<network> MULTISIG_ADDRESS=0x… bash scripts/transfer-platform-authority.sh --include-upgrade-cap` (the script re-derives the address from the recorded keys, weights and threshold and refuses on a mismatch).
    Each object is re-read on-chain (exact type, this package, owned by the deploy key) before it is
    sent. `deployments.json` then records the multisig as `custody.multisigAddress` and
    `custody.upgradeCapOwner`.
