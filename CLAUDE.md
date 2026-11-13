@@ -1,8 +1,7 @@
 # CLAUDE.md — access_gate
 
-Technical guidance for the `access_gate` Move package. User overview is in
-[README.md](README.md); repo-wide policy is in the repo-root
-[CLAUDE.md](../../../../CLAUDE.md).
+Technical, deployment and integration guidance for the `access_gate` Move package. User overview is in
+[README.md](README.md).
 
 ## What this is
 
@@ -68,9 +67,27 @@ Tests reference these by literal in `#[expected_failure(abort_code = …)]` beca
 module-private constants are not cross-module referenceable in that attribute — keep the
 literal and the constant in sync if you renumber.
 
+## Package, deploy and verify
+
+- Package `access_gate`, module `access_gate::access_gate`, edition 2024, 0BSD.
+- NFT type strings after publish: `<PACKAGE_ID>::access_gate::AccessNFT` and
+  `<PACKAGE_ID>::access_gate::SoulboundAccessNFT`. A verifier filters owned objects by the type matching
+  the gate's `soulbound` flag.
+- Deploy: `sui move test --build-env testnet`, then `./scripts/publish.sh <localnet|testnet|mainnet> [--create-gate]`.
+  It writes `.env.<network>` with `ACCESS_GATE_PACKAGE_ID`, `ACCESS_GATE_UPGRADE_CAP_ID`, `ACCESS_NFT_TYPE`,
+  `SOULBOUND_NFT_TYPE` and (with `--create-gate`) `ACCESS_GATE_GATE_ID` / `ACCESS_GATE_ADMIN_CAP_ID`; consumers read
+  these. Only public ids and addresses go into it; no secrets in scripts.
+- **Per-network isolation:** publish and create a distinct gate per network. The NFT type embeds the package id, so a
+  testnet NFT can never satisfy a mainnet gate check; never share a gate id or NFT type across networks.
+- **UpgradeCap:** custody follows [CUSTODY.md](CUSTODY.md): transfer to the multisig
+  (`transfer-platform-authority.sh --include-upgrade-cap`), verify, then burn on the planned date (`make-immutable.sh`).
+  An upgrade in the window bumps `VERSION` and calls `migrate`.
+- Verify: `sui client object <GATE_ID> --json | jq '.data.content.fields'` (price, paused, flags) and
+  `sui client object <PACKAGE_ID> --json | jq -r '.data.owner'` (`Immutable` once frozen).
+
 ## Testing
 
-`sui move test --build-env testnet` — 94 tests (`tests/access_gate_tests.move`): `init` defaults,
+`sui move test --build-env testnet` — 97 tests (`tests/access_gate_tests.move`): `init` defaults,
 gate creation, purchase (exact/overpay/free/underpay/paused, commission split, u64::MAX price at
 the 10% cap, dust rounding), single-use decrement + receipt vs auto-burn, every abort code on both
 the transferable and soulbound paths, foreign-cap and frozen-gate guards, platform setters, voluntary
@@ -84,6 +101,7 @@ entries/branches.
 - Keep it dependency-free (only Sui framework). Generality is the point.
 - New config → add a field to `Gate` + an `AdminCap`-gated setter + a `GateCreatedEvent`
   field + a view + tests.
+- Generate tests with every behaviour change.
 - If you touch the ABI (entry signatures, event fields, abort codes), update the TS client
   (`@meddleware/access-gate-client`: builders, BCS event layouts, `ACCESS_GATE_ABORTS`) and both
   access-gate gateways — they mirror this.
