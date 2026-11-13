@@ -1144,6 +1144,59 @@ fun test_commission_capped_at_ten_percent_after_floor_raise() {
     s.end();
 }
 
+// A floor beyond the setter's ceiling (only a config built by the test constructor can hold one) still saturates instead of overflowing.
+#[test]
+fun test_min_paid_price_saturates_for_an_extreme_floor() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 18_446_744_073_709_551_615, 0);
+    let platform = s.take_shared<PlatformConfig>();
+    assert!(access_gate::min_paid_price_mist(&platform) == 18_446_744_073_709_551_615, 0);
+    ts::return_shared(platform);
+    s.end();
+}
+
+// ── Fee ceilings (E_FEE_TOO_HIGH = 17): OQ20 ─────────────────────────────────────
+#[test]
+fun test_fee_setters_accept_their_ceilings() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_min_commission_mist(&admin, &mut platform, 100_000_000);
+    access_gate::set_free_gate_fee_mist(&admin, &mut platform, 10_000_000_000);
+    assert!(access_gate::platform_min_commission_mist(&platform) == 100_000_000, 0);
+    assert!(access_gate::platform_free_gate_fee_mist(&platform) == 10_000_000_000, 1);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 17)] // E_FEE_TOO_HIGH
+fun test_min_commission_above_its_ceiling_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_min_commission_mist(&admin, &mut platform, 100_000_001);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 17)] // E_FEE_TOO_HIGH
+fun test_free_gate_fee_above_its_ceiling_aborts() {
+    let mut s = ts::begin(CREATOR);
+    setup_platform_with(&mut s, TREASURY, 20, 0, 0);
+    let admin = access_gate::new_platform_admin_cap_for_testing(s.ctx());
+    let mut platform = s.take_shared<PlatformConfig>();
+    access_gate::set_free_gate_fee_mist(&admin, &mut platform, 10_000_000_001);
+    ts::return_shared(platform);
+    access_gate::burn_platform_admin_cap_for_testing(admin);
+    s.end();
+}
+
 #[test]
 fun test_min_paid_price_is_ten_times_the_floor() {
     let mut s = ts::begin(CREATOR);
@@ -1155,8 +1208,8 @@ fun test_min_paid_price_is_ten_times_the_floor() {
     assert!(access_gate::min_paid_price_mist(&platform) == 10, 1);
     access_gate::set_min_commission_mist(&admin, &mut platform, 1_000_000);
     assert!(access_gate::min_paid_price_mist(&platform) == 10_000_000, 2);
-    access_gate::set_min_commission_mist(&admin, &mut platform, 18_446_744_073_709_551_615);
-    assert!(access_gate::min_paid_price_mist(&platform) == 18_446_744_073_709_551_615, 3); // saturates
+    access_gate::set_min_commission_mist(&admin, &mut platform, 100_000_000); // the ceiling
+    assert!(access_gate::min_paid_price_mist(&platform) == 1_000_000_000, 3);
     ts::return_shared(platform);
     access_gate::burn_platform_admin_cap_for_testing(admin);
     s.end();

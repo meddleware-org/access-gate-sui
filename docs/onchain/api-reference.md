@@ -136,6 +136,7 @@ Gate setters other than `make_gate_free` emit no events; read the current `Gate`
 | 14 | `E_NOT_UPGRADE` | `migrate` when `PlatformConfig` is already at or past this package's `VERSION`. |
 | 15 | `E_POLICY_COMBINATION` | `new_gate_policy` with `pause_blocks_decryption` or `pause_blocks_access` but not `freeze_requires_unpaused`: the gate could be paused and frozen for good. |
 | 16 | `E_USES_KIND_IMMUTABLE` | `set_default_uses` tried to switch between unlimited passes (0) and single-use passes (N > 0). |
+| 17 | `E_FEE_TOO_HIGH` | `set_min_commission_mist` above 0.1 SUI (100 000 000 MIST) or `set_free_gate_fee_mist` above 10 SUI (10 000 000 000 MIST). |
 
 Codes are unique within this module only — disambiguate by `(module, code)`.
 

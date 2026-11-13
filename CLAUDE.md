@@ -62,7 +62,7 @@ Consumers (a gateway, a frontend, a contract) compose on top.
 `E_PAUSED=1`, `E_INSUFFICIENT_PAYMENT=2`, `E_NOT_SINGLE_USE=3`, `E_NO_USES_REMAINING=4`,
 `E_WRONG_GATE=5`, `E_GATE_FROZEN=6`, `E_COMMISSION_TOO_HIGH=7`, `E_INVALID_NONCE=8`,
 `E_ZERO_ADDRESS=9`, `E_FREEZE_WHILE_PAUSED=10`, `E_PRICE_TOO_LOW=11`, `E_FREE_FEE_UNPAID=12`,
-`E_WRONG_VERSION=13`, `E_NOT_UPGRADE=14`, `E_POLICY_COMBINATION=15`, `E_USES_KIND_IMMUTABLE=16`.
+`E_WRONG_VERSION=13`, `E_NOT_UPGRADE=14`, `E_POLICY_COMBINATION=15`, `E_USES_KIND_IMMUTABLE=16`, `E_FEE_TOO_HIGH=17`.
 Tests reference these by literal in `#[expected_failure(abort_code = …)]` because
 module-private constants are not cross-module referenceable in that attribute — keep the
 literal and the constant in sync if you renumber.

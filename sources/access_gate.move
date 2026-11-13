@@ -165,6 +165,9 @@ const E_POLICY_COMBINATION: u64 = 15;
 /// The kind of pass a gate mints is fixed at creation (verifiers are configured for one kind); only the
 /// number of uses of a single-use gate can change.
 const E_USES_KIND_IMMUTABLE: u64 = 16;
+/// `set_min_commission_mist` or `set_free_gate_fee_mist` was called with a value above its hard ceiling
+/// (`MAX_MIN_COMMISSION_MIST`, `MAX_FREE_GATE_FEE_MIST`).
+const E_FEE_TOO_HIGH: u64 = 17;
 
 /// This package version. Bump it in every upgrade that must retire older versions, then call `migrate`.
 const VERSION: u64 = 1;
@@ -200,6 +203,12 @@ public struct CommissionTerms has copy, drop, store {
 
 /// Maximum `commission_bps` (10%). `set_commission_bps` aborts above it.
 const MAX_COMMISSION_BPS: u64 = 1000;
+/// Hard ceiling of `min_commission_mist`: 0.1 SUI per paid mint (200 times the 0.0005 SUI default). Without it,
+/// a compromised `PlatformAdminCap` could make every paid mint cost an absurd fee, and once the package is
+/// immutable only the multisig bounds the value (OQ20). `set_min_commission_mist` aborts above it.
+const MAX_MIN_COMMISSION_MIST: u64 = 100_000_000;
+/// Hard ceiling of `free_gate_fee_mist`: 10 SUI (10 times the 1 SUI default). `set_free_gate_fee_mist` aborts above it.
+const MAX_FREE_GATE_FEE_MIST: u64 = 10_000_000_000;
 /// Basis-point denominator.
 const BPS_DENOMINATOR: u64 = 10000;
 /// `init` defaults: 0.2% commission, never less than 0.0005 SUI per paid mint (so the minimum paid
@@ -1056,25 +1065,27 @@ public fun set_commission_bps(
     emit_platform_updated(config);
 }
 
-/// Update the commission floor. Existing gates keep their price; their commission stays capped at
-/// 10% of it. New and re-priced paid gates must meet the new `min_paid_price_mist`.
+/// Update the commission floor, at most `MAX_MIN_COMMISSION_MIST` (0.1 SUI). Existing gates keep their price; their
+/// commission stays capped at 10% of it. New and re-priced paid gates must meet the new `min_paid_price_mist`.
 public fun set_min_commission_mist(
     _cap: &PlatformAdminCap,
     config: &mut PlatformConfig,
     min_commission_mist: u64,
 ) {
     check_version(config);
+    assert!(min_commission_mist <= MAX_MIN_COMMISSION_MIST, E_FEE_TOO_HIGH);
     config.min_commission_mist = min_commission_mist;
     emit_platform_updated(config);
 }
 
-/// Update the one-off fee for making a gate free (affects gates made free from now on).
+/// Update the one-off fee for making a gate free, at most `MAX_FREE_GATE_FEE_MIST` (10 SUI). Affects gates made free from now on.
 public fun set_free_gate_fee_mist(
     _cap: &PlatformAdminCap,
     config: &mut PlatformConfig,
     free_gate_fee_mist: u64,
 ) {
     check_version(config);
+    assert!(free_gate_fee_mist <= MAX_FREE_GATE_FEE_MIST, E_FEE_TOO_HIGH);
     config.free_gate_fee_mist = free_gate_fee_mist;
     emit_platform_updated(config);
 }
